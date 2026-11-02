@@ -217,8 +217,8 @@ public class RadarDetectionSystem : MonoBehaviour
         get => ringLineWidth;
         set
         {
-            float next = Mathf.Clamp(value, 0.4f, 40f);
-            if (Mathf.Abs(next - ringLineWidth) < 0.01f)
+            float next = Mathf.Clamp(value, 0.02f, 40f);
+            if (Mathf.Abs(next - ringLineWidth) < 0.001f)
                 return;
             ringLineWidth = next;
             ClearRings();
@@ -427,8 +427,8 @@ public class RadarDetectionSystem : MonoBehaviour
             ringRadius = store.planeIcon.ringRadius;
         if (store.planeIcon != null && store.planeIcon.saved && store.planeIcon.hasRingOffset)
             ringOffset = new Vector2(store.planeIcon.ringOffsetX, store.planeIcon.ringOffsetY);
-        if (store.planeIcon != null && store.planeIcon.saved && store.planeIcon.ringThickness > 0.05f)
-            ringLineWidth = store.planeIcon.ringThickness;
+        if (store.planeIcon != null && store.planeIcon.saved && store.planeIcon.ringThickness > 0.01f)
+            ringLineWidth = Mathf.Clamp(store.planeIcon.ringThickness, 0.02f, 40f);
         if (store.planeIcon != null && store.planeIcon.saved && store.planeIcon.radarLine2D > 0.01f)
         {
             sectorLineWidth = store.planeIcon.radarLine2D;
@@ -839,6 +839,7 @@ public class RadarDetectionSystem : MonoBehaviour
         if (string.IsNullOrWhiteSpace(text))
             return false;
         if (text.IndexOf("前", StringComparison.Ordinal) >= 0
+            || text.IndexOf("机头", StringComparison.Ordinal) >= 0
             || text.IndexOf("nose", StringComparison.OrdinalIgnoreCase) >= 0
             || text.IndexOf("front", StringComparison.OrdinalIgnoreCase) >= 0)
         {
@@ -846,6 +847,7 @@ public class RadarDetectionSystem : MonoBehaviour
             return true;
         }
         if (text.IndexOf("后", StringComparison.Ordinal) >= 0
+            || text.IndexOf("机尾", StringComparison.Ordinal) >= 0
             || text.IndexOf("tail", StringComparison.OrdinalIgnoreCase) >= 0
             || text.IndexOf("rear", StringComparison.OrdinalIgnoreCase) >= 0
             || text.IndexOf("aft", StringComparison.OrdinalIgnoreCase) >= 0)

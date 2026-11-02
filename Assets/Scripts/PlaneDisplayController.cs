@@ -106,6 +106,23 @@ public class PlaneDisplayController : MonoBehaviour
 
     public bool IsTrailVisible => isTrailVisible;
     public RectTransform MapRoot => mapRoot;
+    public Sprite MapSprite
+    {
+        get
+        {
+            if (mapRoot == null)
+                return null;
+            var img = mapRoot.GetComponent<Image>();
+            return img != null ? img.sprite : null;
+        }
+    }
+    public bool TryGetGeoRange(out Vector2 lonRange, out Vector2 latRange)
+    {
+        lonRange = longitudeRange;
+        latRange = latitudeRange;
+        return Mathf.Abs(longitudeRange.y - longitudeRange.x) > 1e-6f
+            && Mathf.Abs(latitudeRange.y - latitudeRange.x) > 1e-6f;
+    }
     public RectTransform PlaneIconPrefab => planeIconPrefab;
     public RectTransform MapOverlayRoot => GetMapOverlayRoot();
     public float PlaneIconScale

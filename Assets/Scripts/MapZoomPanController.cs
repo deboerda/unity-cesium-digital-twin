@@ -97,6 +97,8 @@ public class MapZoomPanController : MonoBehaviour, IScrollHandler
 
         if (Input.GetMouseButtonUp(0))
         {
+            if (dragging)
+                SaveView();
             dragging = false;
             pressStartedOverMap = false;
         }
@@ -212,6 +214,8 @@ public class MapZoomPanController : MonoBehaviour, IScrollHandler
         content.localScale = new Vector3(zoom, zoom, 1f);
         content.anchoredPosition = pivot - (pivot - oldPos) * (zoom / oldZoom);
         ClampToMap();
+        if (Application.isPlaying)
+            SaveView();
     }
 
     private void ClampToMap()

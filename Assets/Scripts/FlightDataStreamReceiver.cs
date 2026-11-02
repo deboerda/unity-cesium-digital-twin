@@ -1619,6 +1619,16 @@ public class FlightDataStreamReceiver : MonoBehaviour
             if (seen.Add("height")) yield return "height";
         }
 
+        // 事件表 detectors[] 用 detector_name，旧协议用 detector_type。
+        if (string.Equals(canonical, "detector_type", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(canonical, "detectorType", StringComparison.OrdinalIgnoreCase))
+        {
+            if (seen.Add("detector_name")) yield return "detector_name";
+            if (seen.Add("detectorName")) yield return "detectorName";
+            if (seen.Add("detector_type")) yield return "detector_type";
+            if (seen.Add("detectorType")) yield return "detectorType";
+        }
+
         if (string.IsNullOrWhiteSpace(canonical))
             yield break;
 
@@ -1731,8 +1741,48 @@ public class FlightDataStreamReceiver : MonoBehaviour
                 continue;
 
             MergeTimetableStateUnsafe(trackId, frameFlightTime, data, token);
+            MergeDetectorsUnsafe(trackId, frameFlightTime, data, token);
             MergeFieldBagUnsafe(trackId, data, token);
         }
+    }
+
+    /// <summary>
+    /// data.detectors[]：一架飞机多个雷达。detector_name 对面板上的雷达名称。
+    /// </summary>
+    private void MergeDetectorsUnsafe(string trackId, string frameFlightTime, JToken data, JToken token)
+    {
+        JToken detectors = GetPropertyIgnoreCase(token, "detectors")
+            ?? GetPropertyIgnoreCase(data, "detectors");
+        if (detectors == null || detectors.Type != JTokenType.Array)
+            return;
+
+        foreach (var item in detectors.Children())
+        {
+            if (item == null || item.Type != JTokenType.Object)
+                continue;
+            string detector = GetDetectorName(item);
+            if (string.IsNullOrWhiteSpace(detector))
+                continue;
+            // 只读这一条雷达对象，不要回落到 data 根上的旧 detector_type。
+            MergeTimetableStateUnsafe(trackId, frameFlightTime, item, item);
+        }
+    }
+
+    private string GetDetectorName(JToken token)
+    {
+        if (token == null)
+            return null;
+        var direct = GetPropertyIgnoreCase(token, "detector_name")
+            ?? GetPropertyIgnoreCase(token, "detectorName")
+            ?? GetPropertyIgnoreCase(token, "detector_type")
+            ?? GetPropertyIgnoreCase(token, "detectorType");
+        if (direct != null && direct.Type != JTokenType.Null)
+        {
+            string text = direct.ToString();
+            if (!string.IsNullOrWhiteSpace(text))
+                return text.Trim();
+        }
+        return GetMappedString(token, "detector_type", "探测器类型", "探测器名称");
     }
 
     private void MergeTimetableStateUnsafe(string trackId, string frameFlightTime, JToken data, JToken token)
@@ -1765,7 +1815,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
         if (speed.HasValue) state.speed = speed.Value;
         if (TryGetRawString(token, "alarm", out string alarm) || TryGetRawString(data, "alarm", out alarm))
             state.alarm = alarm ?? string.Empty;
-        string detector = GetMappedString(token, "detector_type", "探测器类型") ?? GetMappedString(data, "detector_type", "探测器类型");
+        string detector = GetDetectorName(token) ?? GetDetectorName(data);
         if (detector != null) state.detectorType = detector;
         string rangeType = GetMappedString(token, "range_type") ?? GetMappedString(data, "range_type");
         if (rangeType != null) state.rangeType = rangeType;

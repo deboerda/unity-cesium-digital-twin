@@ -55,15 +55,7 @@ Shader "HK132/RadarVolume"
 
             fixed4 frag(v2f i) : SV_Target
             {
-                float3 n = normalize(i.worldNormal);
-                float3 v = normalize(i.viewDir);
-                float ndotv = saturate(dot(n, v));
-                float edge = smoothstep(_EdgeStart, _EdgeEnd, ndotv);
-                float3 rgb = lerp(_Color.rgb, _EdgeColor.rgb, edge);
-                // 正面按壳体衰减，避免球体大面积朝向相机时比锥体实一截。
-                float shell = lerp(1.0, 0.28, ndotv);
-                float alpha = lerp(_Color.a * shell, _EdgeColor.a, edge);
-                return fixed4(rgb, saturate(alpha));
+                return fixed4(_Color.rgb, saturate(_Color.a));
             }
             ENDCG
         }

@@ -136,7 +136,7 @@ public class ReferencePlanePin : MonoBehaviour
         if (radar != null)
         {
             radar.DetectionRingRadius = NumberRow("ring", "触发环", radar.DetectionRingRadius, 0.05f, 40f);
-            radar.DetectionRingThickness = NumberRow("ringThick", "环粗细", radar.DetectionRingThickness, 0.05f, 24f);
+            radar.DetectionRingThickness = NumberRow("ringThick", "环粗细", radar.DetectionRingThickness, 0.02f, 24f);
             Vector2 ringOff = radar.DetectionRingOffset;
             ringOff.x = NumberRow("ringX", "环右舷", ringOff.x, -200f, 200f);
             ringOff.y = NumberRow("ringY", "环机头", ringOff.y, -200f, 200f);
@@ -149,8 +149,9 @@ public class ReferencePlanePin : MonoBehaviour
         if (flight != null)
         {
             flight.TrailWidthMeters = NumberRow("trail3d", "三维轨迹", flight.TrailWidthMeters, 0.2f, 80f);
-            flight.SetModelLength(NumberRow("model3d", "三维机模", flight.ModelLength, 0.2f, 48f));
+            flight.SetModelLength(NumberRow("model3d", "三维机模", flight.ModelLength, 0.2f, 80f));
             flight.RadarEdgePixels = NumberRow("line3d", "三维线宽", flight.RadarEdgePixels, 0.2f, 6f);
+            flight.AxisGizmoWidth = NumberRow("axisW", "坐标轴线宽", flight.AxisGizmoWidth, 0.5f, 12f);
         }
 
         iconScale = NumberRow("pin", "基准点", iconScale, 0.05f, 3f);
@@ -419,6 +420,7 @@ public class ReferencePlanePin : MonoBehaviour
             store.planeIcon.radarLine3D = FlightSceneView.Active.RadarEdgePixels;
             store.planeIcon.modelLength = FlightSceneView.Active.ModelLength;
             store.planeIcon.trailWidth3D = FlightSceneView.Active.TrailWidthMeters;
+            store.planeIcon.axisGizmoWidth = FlightSceneView.Active.AxisGizmoWidth;
         }
         PanelMemory.Save(store);
     }

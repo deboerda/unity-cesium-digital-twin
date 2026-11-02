@@ -112,3 +112,6 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Codely Bridge 本机心跳（端口会变）；包本身 .codely.packages/ 要进仓库
+.com-unity-codely.json

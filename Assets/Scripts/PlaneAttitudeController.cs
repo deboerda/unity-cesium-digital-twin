@@ -20,6 +20,7 @@ public class PlaneAttitudeController : MonoBehaviour
     [SerializeField] private float headingOffset = 0f;
     [SerializeField] private string attitudeCameraName = "飞机姿态相机";
     private Camera attitudeCamera;
+    private const int FlightSceneLayer = 3;
     [Tooltip("俯仰轴翻转（有些模型 pitch 正负相反）")]
     [SerializeField] private bool invertPitch = false;
     [Tooltip("横滚轴翻转")]
@@ -37,6 +38,7 @@ public class PlaneAttitudeController : MonoBehaviour
         restRotation = transform.rotation;
         hasRest = true;
         targetRotation = restRotation;
+        ExcludeFlightGroundFromAttitudeCamera();
     }
 
     private void Update()
@@ -98,12 +100,7 @@ public class PlaneAttitudeController : MonoBehaviour
 
     private Quaternion AttitudeRotation(float heading, float pitch, float roll)
     {
-        if (attitudeCamera == null)
-        {
-            var camGo = GameObject.Find(attitudeCameraName);
-            if (camGo != null)
-                attitudeCamera = camGo.GetComponent<Camera>();
-        }
+        ExcludeFlightGroundFromAttitudeCamera();
 
         if (!hasRest)
         {
@@ -120,5 +117,19 @@ public class PlaneAttitudeController : MonoBehaviour
         Vector3 nose = pitchRot * yaw * intoScreen;
         Quaternion rollRot = Quaternion.AngleAxis(-roll, nose);
         return rollRot * pitchRot * yaw * restRotation;
+    }
+
+    /// <summary>姿态窗口只看机模，不画三维飞行视图的地面/锥体（FlightLayer）。</summary>
+    private void ExcludeFlightGroundFromAttitudeCamera()
+    {
+        if (attitudeCamera == null)
+        {
+            var camGo = GameObject.Find(attitudeCameraName);
+            if (camGo != null)
+                attitudeCamera = camGo.GetComponent<Camera>();
+        }
+        if (attitudeCamera == null)
+            return;
+        attitudeCamera.cullingMask &= ~(1 << FlightSceneLayer);
     }
 }

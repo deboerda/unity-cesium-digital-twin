@@ -60,7 +60,11 @@ public class ViewModeSwitcher : MonoBehaviour
         ResolveRefs();
         BindButtons();
         EnsureFlightView();
-        ShowOverview();
+        var saved = PanelMemory.Load();
+        if (saved.mapView != null && saved.mapView.flight3D)
+            ShowFlight();
+        else
+            ShowOverview();
     }
 
     public void ShowOverview()
@@ -74,6 +78,7 @@ public class ViewModeSwitcher : MonoBehaviour
             flightCamera.enabled = false;
         PaintButtons();
         DifferenceLabelToggleButton.SyncVisibility();
+        RememberMode(false);
     }
 
     public void ShowFlight()
@@ -94,6 +99,16 @@ public class ViewModeSwitcher : MonoBehaviour
             scene.Bind(flightCamera, flightViewImage, false);
         PaintButtons();
         DifferenceLabelToggleButton.SyncVisibility();
+        RememberMode(true);
+    }
+
+    private static void RememberMode(bool flight3D)
+    {
+        var store = PanelMemory.Load();
+        if (store.mapView == null)
+            store.mapView = new PanelMemory.MapViewTune();
+        store.mapView.flight3D = flight3D;
+        PanelMemory.Save(store);
     }
 
     private void ResolveRefs()

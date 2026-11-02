@@ -25,6 +25,12 @@ public class FlightSceneView : MonoBehaviour
     private float yaw;
     private float pitch;
     private Material skyMaterial;
+    private Transform ground;
+    private Material groundMaterial;
+    private Texture groundTexture;
+    private Vector2 cachedLonRange = new Vector2(97.2f, 110.5f);
+    private Vector2 cachedLatRange = new Vector2(26.2f, 34.9f);
+    private bool hasCachedGeoRange;
     private GameObject modelTemplate;
     private bool hasOrigin;
     private float originLat;
@@ -35,6 +41,15 @@ public class FlightSceneView : MonoBehaviour
     private readonly Dictionary<string, MeshFilter> volumes = new Dictionary<string, MeshFilter>();
     private readonly Dictionary<string, LineRenderer> hits = new Dictionary<string, LineRenderer>();
     private readonly Dictionary<string, LineRenderer> volumeEdges = new Dictionary<string, LineRenderer>();
+    private readonly List<VolumeOutlineJob> outlineJobs = new List<VolumeOutlineJob>();
+
+    private struct VolumeOutlineJob
+    {
+        public string key;
+        public RadarDetectionSystem.SensorInfo sensor;
+        public Vector3 originMeters;
+        public Color color;
+    }
     private readonly Dictionary<string, List<Vector3>> liveTrails = new Dictionary<string, List<Vector3>>();
     private readonly Dictionary<string, float> stableAltitude = new Dictionary<string, float>();
     private readonly Dictionary<string, float> altitudeTime = new Dictionary<string, float>();
@@ -46,6 +61,7 @@ public class FlightSceneView : MonoBehaviour
     public static FlightSceneView Active { get; private set; }
     public float RadarEdgePixels = 1.15f;
     public float TrailWidthMeters = 12f;
+    public float AxisGizmoWidth = 3.5f;
     public float ModelLength { get; private set; } = 18f;
     private float appliedModelLength = 18f;
 
@@ -92,14 +108,19 @@ public class FlightSceneView : MonoBehaviour
             SetModelLength(saved.planeIcon.modelLength);
         if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.trailWidth3D > 0.2f)
             TrailWidthMeters = saved.planeIcon.trailWidth3D;
+        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.axisGizmoWidth > 0.4f)
+            AxisGizmoWidth = saved.planeIcon.axisGizmoWidth;
         if (image != null)
             viewImage = image;
         if (reframe)
             FrameCamera(lastFocus, lastHeading, Mathf.Max(40f, lastSpan), true);
-        else
+        else if (!RestoreCameraView())
             ApplyDefaultCameraIfNeeded();
         EnsureRoot();
         EnsureSky();
+        RefreshDisplayScale();
+        CacheMapSource(ResolveMap());
+        EnsureGround();
         if (flightCamera != null)
         {
             flightCamera.cullingMask = 1 << FlightLayer;
@@ -120,10 +141,24 @@ public class FlightSceneView : MonoBehaviour
             return;
         Navigate();
         FaceLabels();
+        UpdateVolumeOutlines();
+        PersistCameraIfNeeded();
         if (Time.unscaledTime < nextRefresh)
             return;
         nextRefresh = Time.unscaledTime + 0.2f;
         Refresh();
+    }
+
+    private void OnDisable()
+    {
+        if (Application.isPlaying)
+            SaveCameraView();
+    }
+
+    private void OnApplicationQuit()
+    {
+        if (Application.isPlaying)
+            SaveCameraView();
     }
 
     private void EnsureRoot()
@@ -146,10 +181,216 @@ public class FlightSceneView : MonoBehaviour
         if (shader == null)
             return;
         skyMaterial = new Material(shader);
-        skyMaterial.SetFloat("_SunSize", 0.02f);
-        skyMaterial.SetFloat("_AtmosphereThickness", 0.7f);
-        skyMaterial.SetColor("_SkyTint", new Color(0.45f, 0.62f, 0.85f));
-        skyMaterial.SetColor("_GroundColor", new Color(0.45f, 0.62f, 0.85f));
+        skyMaterial.SetFloat("_SunSize", 0.018f);
+        skyMaterial.SetFloat("_AtmosphereThickness", 0.55f);
+        skyMaterial.SetColor("_SkyTint", new Color(0.38f, 0.58f, 0.88f));
+        skyMaterial.SetColor("_GroundColor", HorizonSkyColor);
+        skyMaterial.SetFloat("_Exposure", 1.05f);
+    }
+
+    private PlaneDisplayController ResolveMap()
+    {
+        return FindAnyObjectByType<PlaneDisplayController>(FindObjectsInactive.Include);
+    }
+
+    private void CacheMapSource(PlaneDisplayController map)
+    {
+        if (map == null)
+            return;
+        if (map.TryGetGeoRange(out Vector2 lonRange, out Vector2 latRange))
+        {
+            cachedLonRange = lonRange;
+            cachedLatRange = latRange;
+            hasCachedGeoRange = true;
+        }
+        Texture tex = LoadMapTexture(map);
+        if (tex != null)
+            groundTexture = tex;
+    }
+
+    private void EnsureGround()
+    {
+        EnsureRoot();
+        if (ground == null)
+        {
+            var existing = root.Find("MapGround");
+            if (existing != null)
+            {
+                var leftoverCol = existing.GetComponent<Collider>();
+                if (leftoverCol != null)
+                    Destroy(leftoverCol);
+                ground = existing;
+            }
+            else
+            {
+                var go = new GameObject("MapGround");
+                go.transform.SetParent(root, false);
+                go.AddComponent<MeshFilter>();
+                go.AddComponent<MeshRenderer>();
+                ground = go.transform;
+            }
+        }
+
+        var filter = ground.GetComponent<MeshFilter>();
+        if (filter == null)
+            filter = ground.gameObject.AddComponent<MeshFilter>();
+        if (filter.sharedMesh == null || filter.sharedMesh.name != "MapGroundAtmosphere")
+            filter.sharedMesh = BuildGroundMesh();
+
+        if (groundMaterial == null)
+        {
+            var shader = Shader.Find("HK132/MapGround");
+            if (shader == null)
+                shader = Shader.Find("Unlit/Texture");
+            if (shader == null)
+                shader = Shader.Find("Sprites/Default");
+            groundMaterial = new Material(shader != null ? shader : Shader.Find("Standard"));
+            groundMaterial.color = Color.white;
+        }
+
+        var renderer = ground.GetComponent<MeshRenderer>();
+        if (renderer == null)
+            renderer = ground.gameObject.AddComponent<MeshRenderer>();
+        renderer.enabled = true;
+        renderer.sharedMaterial = groundMaterial;
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+        renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+        renderer.allowOcclusionWhenDynamic = false;
+        ground.localRotation = Quaternion.identity;
+        SetLayer(ground.gameObject);
+        RefreshGround();
+    }
+
+    private static readonly Color HorizonSkyColor = new Color(0.70f, 0.82f, 0.90f, 1f);
+
+    private static Mesh BuildGroundMesh()
+    {
+        // 中间 ±0.5 铺真实地图；外面是同平面雾色延伸，用距离雾接天空，不按矩形淡出。
+        const int n = 49;
+        const float extent = 4.5f;
+        const float mapHalf = 0.5f;
+        var verts = new Vector3[n * n];
+        var uvs = new Vector2[n * n];
+        var norms = new Vector3[n * n];
+        for (int iz = 0; iz < n; iz++)
+        {
+            float z = Mathf.Lerp(-extent, extent, iz / (n - 1f));
+            for (int ix = 0; ix < n; ix++)
+            {
+                float x = Mathf.Lerp(-extent, extent, ix / (n - 1f));
+                int i = iz * n + ix;
+                verts[i] = new Vector3(x, 0f, z);
+                uvs[i] = new Vector2(x + mapHalf, z + mapHalf);
+                norms[i] = Vector3.up;
+            }
+        }
+        var tris = new int[(n - 1) * (n - 1) * 6];
+        int tri = 0;
+        for (int iz = 0; iz < n - 1; iz++)
+        {
+            for (int ix = 0; ix < n - 1; ix++)
+            {
+                int a = iz * n + ix;
+                int b = a + 1;
+                int c = a + n;
+                int d = c + 1;
+                tris[tri++] = a; tris[tri++] = c; tris[tri++] = b;
+                tris[tri++] = c; tris[tri++] = d; tris[tri++] = b;
+            }
+        }
+        var mesh = new Mesh { name = "MapGroundAtmosphere" };
+        mesh.vertices = verts;
+        mesh.uv = uvs;
+        mesh.normals = norms;
+        mesh.triangles = tris;
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    private void RefreshGround()
+    {
+        if (ground == null)
+            EnsureGround();
+        if (ground == null)
+            return;
+
+        RefreshDisplayScale();
+        CacheMapSource(ResolveMap());
+        Vector2 lonRange = hasCachedGeoRange ? cachedLonRange : new Vector2(97.2f, 110.5f);
+        Vector2 latRange = hasCachedGeoRange ? cachedLatRange : new Vector2(26.2f, 34.9f);
+
+        float lat0 = hasOrigin ? originLat : (latRange.x + latRange.y) * 0.5f;
+        float lng0 = hasOrigin ? originLng : (lonRange.x + lonRange.y) * 0.5f;
+        Vector3 sw = ToVisualRelative(lonRange.x, latRange.x, lat0, lng0);
+        Vector3 se = ToVisualRelative(lonRange.y, latRange.x, lat0, lng0);
+        Vector3 nw = ToVisualRelative(lonRange.x, latRange.y, lat0, lng0);
+        Vector3 center = (sw + se + nw + ToVisualRelative(lonRange.y, latRange.y, lat0, lng0)) * 0.25f;
+        float width = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(se.x, 0f, se.z)));
+        float depth = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(nw.x, 0f, nw.z)));
+
+        ground.position = new Vector3(center.x, 0f, center.z);
+        ground.localRotation = Quaternion.identity;
+        ground.localScale = new Vector3(width, 1f, depth);
+        ground.gameObject.SetActive(true);
+        SetLayer(ground.gameObject);
+
+        if (groundTexture == null)
+            groundTexture = LoadMapTexture(ResolveMap());
+        if (groundMaterial != null)
+        {
+            if (groundTexture != null)
+            {
+                groundMaterial.mainTexture = groundTexture;
+                groundMaterial.SetTexture("_MainTex", groundTexture);
+            }
+            groundMaterial.color = Color.white;
+            groundMaterial.SetColor("_FogColor", HorizonSkyColor);
+            groundMaterial.SetColor("_HorizonColor", HorizonSkyColor);
+            float span = Mathf.Max(width, depth);
+            groundMaterial.SetFloat("_FogDensity", 2.4f / Mathf.Max(1f, span));
+            groundMaterial.SetFloat("_EdgeSoft", 0.018f);
+            groundMaterial.SetVector("_Center", new Vector4(center.x, 0f, center.z, 0f));
+            groundMaterial.SetFloat("_Curve", 0.035f / Mathf.Max(1f, span));
+            var renderer = ground.GetComponent<MeshRenderer>();
+            if (renderer != null)
+            {
+                renderer.enabled = true;
+                renderer.sharedMaterial = groundMaterial;
+            }
+        }
+
+        var filter = ground.GetComponent<MeshFilter>();
+        if (filter != null && filter.sharedMesh != null)
+            filter.sharedMesh.RecalculateBounds();
+
+        if (flightCamera != null)
+        {
+            float span = Mathf.Max(width, depth);
+            flightCamera.nearClipPlane = Mathf.Min(flightCamera.nearClipPlane, 0.3f);
+            flightCamera.farClipPlane = Mathf.Max(flightCamera.farClipPlane, span * 8f, 250000f);
+        }
+    }
+
+    private static Texture LoadMapTexture(PlaneDisplayController map)
+    {
+        if (map != null && map.MapSprite != null && map.MapSprite.texture != null)
+            return map.MapSprite.texture;
+        if (map != null && map.MapRoot != null)
+        {
+            var images = map.MapRoot.GetComponentsInChildren<Image>(true);
+            for (int i = 0; i < images.Length; i++)
+            {
+                if (images[i] != null && images[i].sprite != null && images[i].sprite.texture != null)
+                    return images[i].sprite.texture;
+            }
+        }
+        return Resources.Load<Texture2D>("成都");
+    }
+
+    private Vector3 ToVisualRelative(double lng, double lat, float lat0, float lng0)
+    {
+        return ToVisual(RadarDetectionSystem.GeoToLocalMeters(lng, lat, 0f, lat0, lng0));
     }
 
     private void Refresh()
@@ -177,6 +418,7 @@ public class FlightSceneView : MonoBehaviour
             hasOrigin = true;
         }
         RefreshDisplayScale();
+        RefreshGround();
 
         var usedPlanes = new HashSet<string>();
         Vector3 sum = Vector3.zero;
@@ -193,6 +435,7 @@ public class FlightSceneView : MonoBehaviour
             plane.position = world;
             Vector3 center = RendererCenter(plane.gameObject);
             plane.position += world - center;
+            LiftModelAboveGround(plane);
             planeCenters[pos.trackId] = world;
             AppendLiveTrail(pos.trackId, world);
             usedPlanes.Add(pos.trackId);
@@ -211,12 +454,33 @@ public class FlightSceneView : MonoBehaviour
 
     private void RefreshDisplayScale()
     {
-        var map = FindAnyObjectByType<PlaneDisplayController>();
-        if (map != null && map.TryGetDisplayScale(originLat, out _, out _, out float uniform))
+        var map = ResolveMap();
+        if (map != null && map.TryGetDisplayScale(hasOrigin ? originLat : 30.55f, out _, out _, out float uniform))
         {
             uniform = Mathf.Max(1e-6f, uniform);
+            // 东西、北、高度同一比例，雷达锥才不会被拉成长条。
             unitsPerMeter = new Vector3(uniform, uniform, uniform);
         }
+    }
+
+    /// <summary>只抬机模，不改雷达/轨迹高度，避免锥体跟着形变。</summary>
+    private static void LiftModelAboveGround(Transform plane)
+    {
+        if (plane == null)
+            return;
+        const float clearance = 0.08f;
+        var renderers = plane.GetComponentsInChildren<Renderer>();
+        if (renderers == null || renderers.Length == 0)
+        {
+            if (plane.position.y < clearance)
+                plane.position += Vector3.up * (clearance - plane.position.y);
+            return;
+        }
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+            bounds.Encapsulate(renderers[i].bounds);
+        if (bounds.min.y < clearance)
+            plane.position += Vector3.up * (clearance - bounds.min.y);
     }
 
     private Vector3 ToVisual(double lng, double lat, float alt)
@@ -688,12 +952,12 @@ public class FlightSceneView : MonoBehaviour
     private void DrawVolumes(RadarDetectionSystem radar, List<FlightDataStreamReceiver.TrackPosition> positions)
     {
         var usedVolumes = new HashSet<string>();
-        var usedEdges = new HashSet<string>();
         var usedHits = new HashSet<string>();
+        outlineJobs.Clear();
         if (radar == null)
         {
             HideUnused(volumes, usedVolumes);
-            HideUnused(volumeEdges, usedEdges);
+            HideUnused(volumeEdges, new HashSet<string>());
             HideUnused(hits, usedHits);
             return;
         }
@@ -737,12 +1001,34 @@ public class FlightSceneView : MonoBehaviour
             var renderer = filter.GetComponent<MeshRenderer>();
             ApplyRadarVolumeMaterial(renderer, color, anyHit);
             filter.gameObject.SetActive(true);
-            DrawCapOutline(key, sensor, originMeters, color, usedEdges);
+            outlineJobs.Add(new VolumeOutlineJob
+            {
+                key = key,
+                sensor = sensor,
+                originMeters = originMeters,
+                color = color
+            });
             usedVolumes.Add(key);
         }
         HideUnused(volumes, usedVolumes);
-        HideUnused(volumeEdges, usedEdges);
         HideUnused(hits, usedHits);
+        UpdateVolumeOutlines();
+    }
+
+    private void UpdateVolumeOutlines()
+    {
+        var usedEdges = new HashSet<string>();
+        if (flightCamera == null)
+        {
+            HideUnused(volumeEdges, usedEdges);
+            return;
+        }
+        for (int i = 0; i < outlineJobs.Count; i++)
+        {
+            var job = outlineJobs[i];
+            DrawCapOutline(job.key, job.sensor, job.originMeters, job.color, usedEdges);
+        }
+        HideUnused(volumeEdges, usedEdges);
     }
 
     private void BuildVolume(Mesh mesh, RadarDetectionSystem.SensorInfo sensor, Vector3 origin)
@@ -752,8 +1038,8 @@ public class FlightSceneView : MonoBehaviour
             BuildSphereVolume(mesh, origin, sensor.maxRangeMeters);
             return;
         }
-        const int seg = 28;
-        const int rings = 6;
+        const int seg = 48;
+        const int rings = 10;
         RadarDetectionSystem.ConeBasis(sensor, out Vector3 axis, out Vector3 side, out Vector3 up);
         float range = sensor.maxRangeMeters;
         var verts = new List<Vector3>(2 + rings * seg) { ToVisual(origin) };
@@ -820,14 +1106,10 @@ public class FlightSceneView : MonoBehaviour
         var colors = new List<Color>(verts.Count);
         var normals = new List<Vector3>(verts.Count);
         Vector3 apex = verts[0];
-        float maxDist = 0.001f;
-        for (int i = 0; i < verts.Count; i++)
-            maxDist = Mathf.Max(maxDist, (verts[i] - apex).magnitude);
         for (int i = 0; i < verts.Count; i++)
         {
             Vector3 radial = verts[i] - apex;
-            float t = Mathf.Clamp01(radial.magnitude / maxDist);
-            colors.Add(new Color(1f, 1f, 1f, Mathf.Lerp(0.9f, 0.45f, t)));
+            colors.Add(Color.white);
             normals.Add(radial.sqrMagnitude > 1e-6f ? radial.normalized : axis);
         }
         mesh.Clear();
@@ -906,8 +1188,7 @@ public class FlightSceneView : MonoBehaviour
         for (int i = 0; i < verts.Count; i++)
         {
             Vector3 radial = verts[i] - center;
-            float t = Mathf.Clamp01(radial.magnitude / Mathf.Max(0.001f, range * Mathf.Max(unitsPerMeter.x, 0.0001f)));
-            colors.Add(new Color(1f, 1f, 1f, Mathf.Lerp(0.9f, 0.45f, t)));
+            colors.Add(Color.white);
             normals.Add(radial.sqrMagnitude > 1e-6f ? radial.normalized : axis);
         }
         mesh.Clear();
@@ -941,50 +1222,138 @@ public class FlightSceneView : MonoBehaviour
 
     private void DrawCapOutline(string key, RadarDetectionSystem.SensorInfo sensor, Vector3 originMeters, Color color, HashSet<string> used)
     {
-        if (sensor.spherical)
-        {
-            DrawSphereOutline(key, originMeters, sensor.maxRangeMeters, color, used);
-            return;
-        }
-        RadarDetectionSystem.ConeBasis(sensor, out Vector3 axis, out Vector3 side, out Vector3 up);
-        float range = sensor.maxRangeMeters;
         Color edge = new Color(
             Mathf.Min(1f, color.r + 0.35f),
             Mathf.Min(1f, color.g + 0.35f),
             Mathf.Min(1f, color.b + 0.35f),
             0.95f);
+        var hull = ScreenSpaceHull(SampleVolumeSurface(sensor, originMeters));
+        if (hull.Count >= 2)
+            StrokeLoop(key + "|hull", hull.ToArray(), edge, used);
+        if (!sensor.spherical)
+            StrokeLoop(key + "|rim", BuildCapRim(sensor, originMeters), edge, used);
+    }
 
-        const int seg = 48;
+    /// <summary>圆锥与球面交线：尾部上下沿，点落在扫描距离球面上。</summary>
+    private Vector3[] BuildCapRim(RadarDetectionSystem.SensorInfo sensor, Vector3 originMeters)
+    {
+        RadarDetectionSystem.ConeBasis(sensor, out Vector3 axis, out Vector3 side, out Vector3 up);
+        float range = sensor.maxRangeMeters;
+        const int seg = 96;
         var rim = new Vector3[seg + 1];
         for (int i = 0; i <= seg; i++)
         {
-            float ang = Mathf.PI * 2f * i / seg;
-            float polar = RadarDetectionSystem.EllipticalHalfRad(sensor, ang);
-            rim[i] = ToVisual(originMeters + SphereOffset(axis, side, up, range, polar, ang));
+            float az = Mathf.PI * 2f * i / seg;
+            float polar = RadarDetectionSystem.EllipticalHalfRad(sensor, az);
+            rim[i] = ToVisual(originMeters + SphereOffset(axis, side, up, range, polar, az));
         }
-        StrokeLoop(key + "|cap", rim, edge, used);
-        float sideHalf = Mathf.Max(
-            RadarDetectionSystem.EllipticalHalfRad(sensor, 0f),
-            RadarDetectionSystem.EllipticalHalfRad(sensor, Mathf.PI * 0.5f));
-        StrokeArc(key + "|capArc", SphereSilhouette(originMeters, axis, range, sideHalf), edge, used);
+        return rim;
     }
 
-    private void DrawSphereOutline(string key, Vector3 originMeters, float range, Color color, HashSet<string> used)
+    /// <summary>与填充网格同一套球面/椭锥采样，描边才能贴住可见轮廓。</summary>
+    private List<Vector3> SampleVolumeSurface(RadarDetectionSystem.SensorInfo sensor, Vector3 origin)
     {
-        Color edge = new Color(
-            Mathf.Min(1f, color.r + 0.35f),
-            Mathf.Min(1f, color.g + 0.35f),
-            Mathf.Min(1f, color.b + 0.35f),
-            0.95f);
-        const int seg = 48;
-        var equator = new Vector3[seg + 1];
-        for (int i = 0; i <= seg; i++)
+        var pts = new List<Vector3>();
+        if (sensor.spherical)
         {
-            float ang = Mathf.PI * 2f * i / seg;
-            equator[i] = ToVisual(originMeters + new Vector3(Mathf.Sin(ang), 0f, Mathf.Cos(ang)) * range);
+            const int seg = 48;
+            const int rings = 16;
+            Vector3 axis = Vector3.up;
+            Vector3 side = Vector3.right;
+            Vector3 up = Vector3.forward;
+            float range = sensor.maxRangeMeters;
+            pts.Add(ToVisual(origin + axis * range));
+            pts.Add(ToVisual(origin - axis * range));
+            for (int r = 1; r < rings; r++)
+            {
+                float polar = Mathf.PI * r / rings;
+                for (int i = 0; i < seg; i++)
+                {
+                    float az = Mathf.PI * 2f * i / seg;
+                    pts.Add(ToVisual(origin + SphereOffset(axis, side, up, range, polar, az)));
+                }
+            }
+            return pts;
         }
-        StrokeLoop(key + "|equator", equator, edge, used);
-        StrokeArc(key + "|sphereArc", SphereSilhouette(originMeters, Vector3.up, range, Mathf.PI), edge, used);
+
+        RadarDetectionSystem.ConeBasis(sensor, out Vector3 cAxis, out Vector3 cSide, out Vector3 cUp);
+        float cRange = sensor.maxRangeMeters;
+        const int cSeg = 96;
+        const int cRings = 16;
+        pts.Add(ToVisual(origin));
+        pts.Add(ToVisual(origin + cAxis * cRange));
+        for (int r = 1; r <= cRings; r++)
+        {
+            for (int i = 0; i < cSeg; i++)
+            {
+                float az = Mathf.PI * 2f * i / cSeg;
+                float polarMax = RadarDetectionSystem.EllipticalHalfRad(sensor, az);
+                float polar = polarMax * r / cRings;
+                pts.Add(ToVisual(origin + SphereOffset(cAxis, cSide, cUp, cRange, polar, az)));
+            }
+        }
+        return pts;
+    }
+
+    private List<Vector3> ScreenSpaceHull(List<Vector3> world)
+    {
+        var hull = new List<Vector3>();
+        if (flightCamera == null || world == null || world.Count < 2)
+            return hull;
+
+        var pts = new List<HullPt>(world.Count);
+        for (int i = 0; i < world.Count; i++)
+        {
+            Vector3 sp = flightCamera.WorldToScreenPoint(world[i]);
+            if (sp.z <= 0.02f)
+                continue;
+            pts.Add(new HullPt { s = new Vector2(sp.x, sp.y), w = world[i] });
+        }
+        if (pts.Count < 3)
+            return hull;
+
+        pts.Sort((a, b) =>
+        {
+            int c = a.s.x.CompareTo(b.s.x);
+            return c != 0 ? c : a.s.y.CompareTo(b.s.y);
+        });
+
+        var lower = new List<HullPt>();
+        var upper = new List<HullPt>();
+        for (int i = 0; i < pts.Count; i++)
+        {
+            while (lower.Count >= 2 && HullCross(lower[lower.Count - 2].s, lower[lower.Count - 1].s, pts[i].s) <= 0f)
+                lower.RemoveAt(lower.Count - 1);
+            lower.Add(pts[i]);
+        }
+        for (int i = pts.Count - 1; i >= 0; i--)
+        {
+            while (upper.Count >= 2 && HullCross(upper[upper.Count - 2].s, upper[upper.Count - 1].s, pts[i].s) <= 0f)
+                upper.RemoveAt(upper.Count - 1);
+            upper.Add(pts[i]);
+        }
+        if (lower.Count > 0)
+            lower.RemoveAt(lower.Count - 1);
+        if (upper.Count > 0)
+            upper.RemoveAt(upper.Count - 1);
+        for (int i = 0; i < lower.Count; i++)
+            hull.Add(lower[i].w);
+        for (int i = 0; i < upper.Count; i++)
+            hull.Add(upper[i].w);
+        if (hull.Count > 0)
+            hull.Add(hull[0]);
+        return hull;
+    }
+
+    private struct HullPt
+    {
+        public Vector2 s;
+        public Vector3 w;
+    }
+
+    private static float HullCross(Vector2 o, Vector2 a, Vector2 b)
+    {
+        return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
     }
 
     private void StrokeLoop(string lineKey, Vector3[] points, Color edge, HashSet<string> used)
@@ -994,9 +1363,12 @@ public class FlightSceneView : MonoBehaviour
         var lr = GetLine(volumeEdges, lineKey, 1f, edge);
         lr.positionCount = points.Length;
         lr.SetPositions(points);
-        lr.widthMultiplier = PixelWidth(points[0], RadarEdgePixels);
+        Vector3 mid = points[points.Length / 2];
+        lr.widthMultiplier = PixelWidth(mid, RadarEdgePixels);
         lr.startColor = lr.endColor = edge;
         lr.numCapVertices = 2;
+        lr.numCornerVertices = 3;
+        lr.alignment = LineAlignment.View;
         lr.gameObject.SetActive(true);
         used.Add(lineKey);
     }
@@ -1024,13 +1396,15 @@ public class FlightSceneView : MonoBehaviour
         return pixels * 2f * dist * Mathf.Tan(flightCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) / height;
     }
 
-    private List<Vector3> SphereSilhouette(Vector3 originMeters, Vector3 axis, float range, float half)
+    private List<Vector3> SphereSilhouette(Vector3 originMeters, Vector3 axis, Vector3 side, Vector3 up, float range, float yawHalfRad, float pitchHalfRad)
     {
         var arc = new List<Vector3>();
         if (flightCamera == null)
             return arc;
         Vector3 apex = ToVisual(originMeters);
         Vector3 axisV = (ToVisual(originMeters + axis) - apex).normalized;
+        Vector3 sideV = (ToVisual(originMeters + side) - apex).normalized;
+        Vector3 upV = (ToVisual(originMeters + up) - apex).normalized;
         float rangeV = (ToVisual(originMeters + axis * range) - apex).magnitude;
         Vector3 view = flightCamera.transform.position - apex;
         float camDist = view.magnitude;
@@ -1040,20 +1414,38 @@ public class FlightSceneView : MonoBehaviour
         float hDist = rangeV * rangeV / camDist;
         float hRad = rangeV * Mathf.Sqrt(Mathf.Max(0f, 1f - (rangeV / camDist) * (rangeV / camDist)));
         Vector3 center = apex + view * hDist;
-        Vector3 side = Vector3.Cross(view, axisV);
-        if (side.sqrMagnitude < 1e-6f)
-            side = Vector3.Cross(view, Vector3.up);
-        side.Normalize();
-        Vector3 up = Vector3.Cross(side, view);
-        const int seg = 72;
+        Vector3 limbSide = Vector3.Cross(view, axisV);
+        if (limbSide.sqrMagnitude < 1e-6f)
+            limbSide = Vector3.Cross(view, Vector3.up);
+        limbSide.Normalize();
+        Vector3 limbUp = Vector3.Cross(limbSide, view);
+        const int seg = 96;
         var on = new bool[seg];
         var sample = new Vector3[seg];
-        float limit = half * Mathf.Rad2Deg + 0.4f;
+        float yawLimit = Mathf.Max(0.5f, yawHalfRad * Mathf.Rad2Deg);
+        float pitchLimit = Mathf.Max(0.5f, pitchHalfRad * Mathf.Rad2Deg);
+        bool full = yawHalfRad >= Mathf.PI * 0.99f && pitchHalfRad >= Mathf.PI * 0.99f;
         for (int i = 0; i < seg; i++)
         {
             float ang = Mathf.PI * 2f * i / seg;
-            sample[i] = center + (side * Mathf.Cos(ang) + up * Mathf.Sin(ang)) * hRad;
-            on[i] = Vector3.Angle(sample[i] - apex, axisV) <= limit;
+            sample[i] = center + (limbSide * Mathf.Cos(ang) + limbUp * Mathf.Sin(ang)) * hRad;
+            if (full)
+            {
+                on[i] = true;
+                continue;
+            }
+            Vector3 d = sample[i] - apex;
+            float z = Vector3.Dot(d, axisV);
+            float x = Vector3.Dot(d, sideV);
+            float y = Vector3.Dot(d, upV);
+            if (z <= 0f)
+            {
+                on[i] = false;
+                continue;
+            }
+            float offAz = Mathf.Atan2(x, z) * Mathf.Rad2Deg;
+            float offEl = Mathf.Atan2(y, z) * Mathf.Rad2Deg;
+            on[i] = (offAz / yawLimit) * (offAz / yawLimit) + (offEl / pitchLimit) * (offEl / pitchLimit) <= 1.02f;
         }
         int start = -1;
         for (int i = 0; i < seg; i++)
@@ -1075,6 +1467,8 @@ public class FlightSceneView : MonoBehaviour
                 break;
             arc.Add(sample[i]);
         }
+        if (arc.Count >= 3 && full)
+            arc.Add(sample[start]);
         return arc;
     }
 
@@ -1089,17 +1483,13 @@ public class FlightSceneView : MonoBehaviour
             mat = new Material(shader != null ? shader : Shader.Find("Sprites/Default"));
             renderer.sharedMaterial = mat;
         }
-        float alpha = anyHit ? 0.18f : 0.12f;
+        float alpha = anyHit ? 0.22f : 0.16f;
         Color fill = new Color(color.r, color.g, color.b, alpha);
-        Color edge = new Color(
-            Mathf.Min(1f, color.r + 0.2f),
-            Mathf.Min(1f, color.g + 0.2f),
-            Mathf.Min(1f, color.b + 0.2f),
-            0.85f);
+        Color edge = new Color(color.r, color.g, color.b, alpha);
         mat.SetColor("_Color", fill);
         mat.SetColor("_EdgeColor", edge);
-        mat.SetFloat("_EdgeStart", 0.28f);
-        mat.SetFloat("_EdgeEnd", 0.02f);
+        mat.SetFloat("_EdgeStart", 0f);
+        mat.SetFloat("_EdgeEnd", 0f);
         mat.color = fill;
     }
 
@@ -1456,7 +1846,60 @@ public class FlightSceneView : MonoBehaviour
     }
 
     private bool placedDefaultCamera;
+    private float nextCameraSave;
     private static readonly Vector3 DefaultCameraPosition = new Vector3(-16.30917f, 18.95884f, -16.00072f);
+
+    private bool RestoreCameraView()
+    {
+        if (flightCamera == null)
+            return false;
+        var saved = PanelMemory.Load();
+        if (saved.flightView == null || !saved.flightView.saved)
+            return false;
+        var v = saved.flightView;
+        flightCamera.transform.position = new Vector3(v.posX, v.posY, v.posZ);
+        yaw = v.yaw;
+        pitch = Mathf.Clamp(v.pitch, -89f, 89f);
+        flightCamera.transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
+        flySpeed = Mathf.Max(0.4f, v.flySpeed);
+        orbitDistance = Mathf.Max(5f, v.orbitDistance);
+        orbitPivot = new Vector3(v.pivotX, v.pivotY, v.pivotZ);
+        userHasControl = true;
+        placedDefaultCamera = true;
+        return true;
+    }
+
+    private void PersistCameraIfNeeded()
+    {
+        if (flightCamera == null || !userHasControl)
+            return;
+        if (Time.unscaledTime < nextCameraSave)
+            return;
+        nextCameraSave = Time.unscaledTime + 0.8f;
+        SaveCameraView();
+    }
+
+    private void SaveCameraView()
+    {
+        if (flightCamera == null)
+            return;
+        var store = PanelMemory.Load();
+        if (store.flightView == null)
+            store.flightView = new PanelMemory.FlightViewTune();
+        var t = flightCamera.transform;
+        store.flightView.saved = true;
+        store.flightView.posX = t.position.x;
+        store.flightView.posY = t.position.y;
+        store.flightView.posZ = t.position.z;
+        store.flightView.yaw = yaw;
+        store.flightView.pitch = pitch;
+        store.flightView.flySpeed = flySpeed;
+        store.flightView.orbitDistance = orbitDistance;
+        store.flightView.pivotX = orbitPivot.x;
+        store.flightView.pivotY = orbitPivot.y;
+        store.flightView.pivotZ = orbitPivot.z;
+        PanelMemory.Save(store);
+    }
 
     private void ApplyDefaultCameraIfNeeded()
     {
@@ -1470,6 +1913,132 @@ public class FlightSceneView : MonoBehaviour
         orbitPivot = Vector3.zero;
         orbitDistance = Mathf.Max(5f, DefaultCameraPosition.magnitude);
         SyncAnglesFromCamera();
+    }
+
+    private void OnGUI()
+    {
+        if (flightCamera == null || viewImage == null || !viewImage.gameObject.activeInHierarchy)
+            return;
+        DrawWorldAxisGizmo();
+    }
+
+    /// <summary>左下角世界坐标轴：X=东、Y=天、Z=北，随相机朝向变化，限制在三维视图内。</summary>
+    private void DrawWorldAxisGizmo()
+    {
+        if (Event.current == null || Event.current.type != EventType.Repaint)
+            return;
+
+        var rect = viewImage.rectTransform;
+        if (rect == null)
+            return;
+
+        var canvas = viewImage.canvas;
+        Camera uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+
+        var corners = new Vector3[4];
+        rect.GetWorldCorners(corners);
+        Vector2 bottomLeft = RectTransformUtility.WorldToScreenPoint(uiCamera, corners[0]);
+        Vector2 topRight = RectTransformUtility.WorldToScreenPoint(uiCamera, corners[2]);
+
+        float guiLeft = Mathf.Min(bottomLeft.x, topRight.x);
+        float guiRight = Mathf.Max(bottomLeft.x, topRight.x);
+        float guiTop = Screen.height - Mathf.Max(bottomLeft.y, topRight.y);
+        float guiBottom = Screen.height - Mathf.Min(bottomLeft.y, topRight.y);
+        float viewW = guiRight - guiLeft;
+        float viewH = guiBottom - guiTop;
+        if (viewW < 48f || viewH < 48f)
+            return;
+
+        float lineW = Mathf.Clamp(AxisGizmoWidth, 0.5f, 12f);
+        const float labelW = 44f;
+        const float labelH = 18f;
+        float halfW = lineW * 0.5f + 2f;
+        Rect clip = new Rect(
+            guiLeft + halfW,
+            guiTop + halfW,
+            Mathf.Max(8f, viewW - halfW * 2f),
+            Mathf.Max(8f, viewH - halfW * 2f));
+
+        float length = Mathf.Clamp(Mathf.Min(viewW, viewH) * 0.12f, 24f, 56f);
+        float insetX = Mathf.Min(length + labelW, clip.width * 0.42f);
+        float insetY = Mathf.Min(length + labelH, clip.height * 0.42f);
+        length = Mathf.Max(12f, Mathf.Min(length, insetX - 8f, insetY - 8f));
+        Vector2 origin = new Vector2(clip.xMin + insetX, clip.yMax - insetY);
+
+        var cam = flightCamera.transform;
+        Vector3[] axes = { Vector3.right, Vector3.up, Vector3.forward };
+        string[] labels = { "东 X", "天 Y", "北 Z" };
+        Color[] colors =
+        {
+            new Color(1f, 0.38f, 0.38f, 0.95f),
+            new Color(0.45f, 1f, 0.5f, 0.95f),
+            new Color(0.45f, 0.72f, 1f, 0.95f),
+        };
+
+        for (int i = 0; i < axes.Length; i++)
+        {
+            Vector3 axis = axes[i];
+            Vector2 dir = new Vector2(Vector3.Dot(axis, cam.right), Vector3.Dot(axis, cam.up));
+            bool towardsViewer = Vector3.Dot(axis, cam.forward) < 0f;
+            float axisLen = length * (towardsViewer ? 1f : 0.82f);
+            Vector2 tip = origin + new Vector2(dir.x, -dir.y) * axisLen;
+            tip = ClipRayToRect(origin, tip, clip);
+            Color color = towardsViewer ? colors[i] : new Color(colors[i].r, colors[i].g, colors[i].b, 0.6f);
+
+            DrawGuiLine(origin, tip, color, towardsViewer ? lineW : lineW * 0.72f);
+
+            Vector2 labelPos = new Vector2(tip.x + 4f, tip.y - 9f);
+            labelPos.x = Mathf.Clamp(labelPos.x, clip.xMin, clip.xMax - labelW);
+            labelPos.y = Mathf.Clamp(labelPos.y, clip.yMin, clip.yMax - labelH);
+            var old = GUI.color;
+            GUI.color = color;
+            GUI.Label(new Rect(labelPos.x, labelPos.y, labelW, labelH), labels[i]);
+            GUI.color = old;
+        }
+
+        float dot = Mathf.Clamp(lineW + 2f, 5f, 12f);
+        var oldColor = GUI.color;
+        GUI.color = new Color(1f, 1f, 1f, 0.85f);
+        GUI.DrawTexture(new Rect(origin.x - dot * 0.5f, origin.y - dot * 0.5f, dot, dot), Texture2D.whiteTexture);
+        GUI.color = oldColor;
+    }
+
+    private static Vector2 ClipRayToRect(Vector2 origin, Vector2 tip, Rect r)
+    {
+        Vector2 d = tip - origin;
+        float t = 1f;
+        if (Mathf.Abs(d.x) > 0.001f)
+        {
+            float tx = d.x > 0f ? (r.xMax - origin.x) / d.x : (r.xMin - origin.x) / d.x;
+            if (tx >= 0f)
+                t = Mathf.Min(t, tx);
+        }
+        if (Mathf.Abs(d.y) > 0.001f)
+        {
+            float ty = d.y > 0f ? (r.yMax - origin.y) / d.y : (r.yMin - origin.y) / d.y;
+            if (ty >= 0f)
+                t = Mathf.Min(t, ty);
+        }
+        return origin + d * Mathf.Clamp01(t);
+    }
+
+    private static void DrawGuiLine(Vector2 from, Vector2 to, Color color, float width)
+    {
+        float dx = to.x - from.x;
+        float dy = to.y - from.y;
+        float len = Mathf.Sqrt(dx * dx + dy * dy);
+        if (len < 0.5f)
+            return;
+
+        Matrix4x4 saved = GUI.matrix;
+        Color savedColor = GUI.color;
+        GUIUtility.RotateAroundPivot(Mathf.Atan2(dy, dx) * Mathf.Rad2Deg, from);
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(from.x, from.y - width * 0.5f, len, width), Texture2D.whiteTexture);
+        GUI.color = savedColor;
+        GUI.matrix = saved;
     }
 
     private void FrameCamera(Vector3 focus, float heading, float span, bool force = false)

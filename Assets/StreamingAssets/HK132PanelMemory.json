@@ -128,6 +128,17 @@
                         "b": 1.0,
                         "a": 1.0
                     }
+                },
+                {
+                    "fieldKey": "flightTime",
+                    "rule": "",
+                    "hideMarker": false,
+                    "color": {
+                        "r": 1.0,
+                        "g": 0.2199999988079071,
+                        "b": 0.2199999988079071,
+                        "a": 1.0
+                    }
                 }
             ]
         },
@@ -233,21 +244,21 @@
             "key": "UAV-002|光电",
             "range": 2000.0,
             "color": {
-                "r": 0.0,
-                "g": 0.0,
-                "b": 0.0,
+                "r": 1.0,
+                "g": 0.3199999928474426,
+                "b": 0.3199999928474426,
                 "a": 1.0
             },
             "visible": true,
-            "hasColor": false
+            "hasColor": true
         },
         {
             "key": "UAV-002|雷达",
             "range": 5000.0,
             "color": {
                 "r": 1.0,
-                "g": 0.47999998927116396,
-                "b": 0.07999999821186066,
+                "g": 0.8199999928474426,
+                "b": 0.11999999731779099,
                 "a": 1.0
             },
             "visible": true,
@@ -327,11 +338,11 @@
         },
         {
             "key": "UAV-003|雷达",
-            "range": 50000.0,
+            "range": 5000.0,
             "color": {
-                "r": 0.05000000074505806,
-                "g": 0.8500000238418579,
-                "b": 1.0,
+                "r": 1.0,
+                "g": 0.3199999928474426,
+                "b": 0.3199999928474426,
                 "a": 1.0
             },
             "visible": true,
@@ -339,7 +350,7 @@
         },
         {
             "key": "UAV-003|光电",
-            "range": -1.0,
+            "range": 5000.0,
             "color": {
                 "r": 0.3499999940395355,
                 "g": 1.0,
@@ -352,6 +363,42 @@
         {
             "key": "UAV-002|电子侦察",
             "range": 50000.0,
+            "color": {
+                "r": 0.0,
+                "g": 0.0,
+                "b": 0.0,
+                "a": 1.0
+            },
+            "visible": true,
+            "hasColor": false
+        },
+        {
+            "key": "UAV-002|雷达1",
+            "range": 5000.0,
+            "color": {
+                "r": 0.0,
+                "g": 0.0,
+                "b": 0.0,
+                "a": 1.0
+            },
+            "visible": true,
+            "hasColor": false
+        },
+        {
+            "key": "UAV-002|雷达2",
+            "range": 5000.0,
+            "color": {
+                "r": 0.0,
+                "g": 0.0,
+                "b": 0.0,
+                "a": 1.0
+            },
+            "visible": true,
+            "hasColor": false
+        },
+        {
+            "key": "UAV-002|雷达3",
+            "range": 5000.0,
             "color": {
                 "r": 0.0,
                 "g": 0.0,
@@ -377,42 +424,16 @@
     ],
     "sensorCatalog": [
         {
-            "trackId": "UAV-002",
-            "detectorType": "光电",
-            "rangeType": "",
-            "detectRange": 0.0,
-            "yawAngle": -27.8700008392334,
-            "pitchAngle": 13.579999923706055,
-            "centerPoint": "中",
-            "centerPoint1": "中",
-            "yawScanAngle": 20.0,
-            "pitchScanAngle": 9.0,
-            "radarStatus": "开启"
-        },
-        {
             "trackId": "UAV-003",
             "detectorType": "光电",
             "rangeType": "",
             "detectRange": 0.0,
-            "yawAngle": 24.450000762939454,
-            "pitchAngle": 11.579999923706055,
+            "yawAngle": -14.859999656677246,
+            "pitchAngle": -0.25999999046325686,
             "centerPoint": "中",
             "centerPoint1": "中",
             "yawScanAngle": 20.0,
-            "pitchScanAngle": 8.0,
-            "radarStatus": "关闭"
-        },
-        {
-            "trackId": "UAV-002",
-            "detectorType": "雷达",
-            "rangeType": "扇形",
-            "detectRange": 30000.0,
-            "yawAngle": 0.0,
-            "pitchAngle": 0.0,
-            "centerPoint": "机头",
-            "centerPoint1": "中",
-            "yawScanAngle": 60.0,
-            "pitchScanAngle": 10.0,
+            "pitchScanAngle": 2.0,
             "radarStatus": "开启"
         },
         {
@@ -420,26 +441,109 @@
             "detectorType": "雷达",
             "rangeType": "",
             "detectRange": 0.0,
-            "yawAngle": 27.15999984741211,
-            "pitchAngle": 13.6899995803833,
+            "yawAngle": 6.389999866485596,
+            "pitchAngle": -9.90999984741211,
             "centerPoint": "前",
             "centerPoint1": "中",
             "yawScanAngle": 40.0,
-            "pitchScanAngle": 9.0,
+            "pitchScanAngle": 7.0,
             "radarStatus": "开启"
+        },
+        {
+            "trackId": "UAV-001",
+            "detectorType": "雷达",
+            "rangeType": "",
+            "detectRange": 0.0,
+            "yawAngle": 23.776412963867189,
+            "pitchAngle": 5.945158958435059,
+            "centerPoint": "机头",
+            "centerPoint1": "中",
+            "yawScanAngle": 120.0,
+            "pitchScanAngle": 40.0,
+            "radarStatus": "开启"
+        },
+        {
+            "trackId": "UAV-001",
+            "detectorType": "光电",
+            "rangeType": "",
+            "detectRange": 0.0,
+            "yawAngle": 204.39791870117188,
+            "pitchAngle": 7.991464138031006,
+            "centerPoint": "中心",
+            "centerPoint1": "中",
+            "yawScanAngle": 80.0,
+            "pitchScanAngle": 20.0,
+            "radarStatus": "开启"
+        },
+        {
+            "trackId": "UAV-001",
+            "detectorType": "球形雷达",
+            "rangeType": "球形",
+            "detectRange": 50000.0,
+            "yawAngle": 0.0,
+            "pitchAngle": 0.0,
+            "centerPoint": "中",
+            "centerPoint1": "中",
+            "yawScanAngle": 360.0,
+            "pitchScanAngle": 360.0,
+            "radarStatus": "有效"
+        },
+        {
+            "trackId": "UAV-002",
+            "detectorType": "雷达1",
+            "rangeType": "",
+            "detectRange": 0.0,
+            "yawAngle": 18.57862091064453,
+            "pitchAngle": 7.608451843261719,
+            "centerPoint": "中心",
+            "centerPoint1": "中",
+            "yawScanAngle": 120.0,
+            "pitchScanAngle": 40.0,
+            "radarStatus": "有效"
+        },
+        {
+            "trackId": "UAV-002",
+            "detectorType": "雷达2",
+            "rangeType": "",
+            "detectRange": 0.0,
+            "yawAngle": 97.47602081298828,
+            "pitchAngle": 4.315700054168701,
+            "centerPoint": "中心",
+            "centerPoint1": "中",
+            "yawScanAngle": 90.0,
+            "pitchScanAngle": 30.0,
+            "radarStatus": "有效"
+        },
+        {
+            "trackId": "UAV-002",
+            "detectorType": "雷达3",
+            "rangeType": "",
+            "detectRange": 0.0,
+            "yawAngle": 172.2745819091797,
+            "pitchAngle": -1.0988279581069947,
+            "centerPoint": "中心",
+            "centerPoint1": "中",
+            "yawScanAngle": 80.0,
+            "pitchScanAngle": 20.0,
+            "radarStatus": "有效"
         }
     ],
-    "removedSensors": [],
+    "removedSensors": [
+        "UAV-001|电子侦察",
+        "UAV-001|红外",
+        "UAV-002|光电",
+        "UAV-002|雷达"
+    ],
     "radar": {
         "saved": true,
-        "front2D": -1.0,
-        "mid2D": 0.0,
+        "front2D": -0.5,
+        "mid2D": 0.30000001192092898,
         "rear2D": -26.0,
-        "front3D": 0.30000001192092898,
+        "front3D": 0.10000000149011612,
         "mid3D": 0.0,
         "rear3D": -6.0,
-        "frontUp": -0.05000000074505806,
-        "midUp": 0.0,
+        "frontUp": -0.019999999552965165,
+        "midUp": -0.029999999329447748,
         "rearUp": -0.6741659045219421
     },
     "diffLabel": {
@@ -448,32 +552,47 @@
         "offsetUp": 0.7862879037857056,
         "offsetForward": -0.8215630054473877,
         "cycleSeconds": 4.0,
-        "r": 0.2756740152835846,
-        "g": 0.5118741989135742,
-        "b": 0.18324784934520722,
+        "r": 0.9223271608352661,
+        "g": 0.7821174263954163,
+        "b": 0.2315056324005127,
         "textScale": 0.2206350713968277
     },
     "planeIcon": {
         "saved": true,
-        "scale": 0.1732877641916275,
+        "scale": 0.10302657634019852,
         "trailWidth": 0.20000000298023225,
         "trailWidth3D": 70.56853485107422,
         "trailSampleMeters": 50.0,
         "trailMaxPoints": 12000.0,
-        "ringRadius": 1.4195654392242432,
+        "ringRadius": 0.7169552445411682,
         "hasRingOffset": true,
-        "ringOffsetX": 2.0,
+        "ringOffsetX": -1.5099999904632569,
         "ringOffsetY": 3.792870018060057e-7,
-        "ringThickness": 0.4000000059604645,
+        "ringThickness": 0.1891295313835144,
         "radarLine2D": 0.10000000149011612,
         "radarLine3D": 1.149999976158142,
-        "modelLength": 0.7664527893066406
+        "modelLength": 0.7664527893066406,
+        "axisGizmoWidth": 7.140561103820801
     },
     "mapView": {
         "saved": true,
-        "zoom": 36.16973876953125,
-        "panX": -355.3823547363281,
-        "panY": -213.23638916015626,
-        "maxZoom": 80.0
+        "zoom": 80.0,
+        "panX": -2217.72021484375,
+        "panY": -1158.6453857421875,
+        "maxZoom": 80.0,
+        "flight3D": true
+    },
+    "flightView": {
+        "saved": true,
+        "posX": -70.03125,
+        "posY": 11.583699226379395,
+        "posZ": -48.9611930847168,
+        "yaw": 272.3709716796875,
+        "pitch": -1.647088646888733,
+        "flySpeed": 45.80543899536133,
+        "orbitDistance": 59.90835952758789,
+        "pivotX": -23.20838165283203,
+        "pivotY": 0.0,
+        "pivotZ": -13.430238723754883
     }
 }

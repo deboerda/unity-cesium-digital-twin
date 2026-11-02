@@ -13,7 +13,7 @@
     "battery": ["battery", "电量"],
     "speed": ["speed", "速度"],
     "alarm": ["alarm", "warning", "告警", "告警信息"],
-    "detector_type": ["detector_type", "detectorType", "探测器类型"],
+    "detector_type": ["detector_type", "detectorType", "detector_name", "detectorName", "探测器类型", "探测器名称"],
     "range_type": ["range_type", "rangeType", "范围类型"],
     "detect_range": ["detect_range", "detectRange", "range", "探测范围"],
     "yaw_angle": ["yaw_angle", "yawAngle", "扫描中心(度)", "扫描中心", "传感器左右偏转角", "左右偏转角"],

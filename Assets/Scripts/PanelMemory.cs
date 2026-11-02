@@ -99,6 +99,7 @@ public static class PanelMemory
         public float radarLine2D = 1.5f;
         public float radarLine3D = 1.15f;
         public float modelLength = 18f;
+        public float axisGizmoWidth = 3.5f;
     }
 
     [Serializable]
@@ -123,6 +124,23 @@ public static class PanelMemory
         public float panX;
         public float panY;
         public float maxZoom = 80f;
+        public bool flight3D;
+    }
+
+    [Serializable]
+    public class FlightViewTune
+    {
+        public bool saved;
+        public float posX;
+        public float posY;
+        public float posZ;
+        public float yaw;
+        public float pitch;
+        public float flySpeed = 8f;
+        public float orbitDistance = 80f;
+        public float pivotX;
+        public float pivotY;
+        public float pivotZ;
     }
 
     [Serializable]
@@ -138,6 +156,7 @@ public static class PanelMemory
         public DiffLabelTune diffLabel = new DiffLabelTune();
         public PlaneIconTune planeIcon = new PlaneIconTune();
         public MapViewTune mapView = new MapViewTune();
+        public FlightViewTune flightView = new FlightViewTune();
     }
 
     public static string FilePath => Path.Combine(Application.persistentDataPath, FileName);

@@ -39,7 +39,7 @@ public class FieldKeyMappingConfig : MonoBehaviour
         public KeyAlias pitchScanAngle = new KeyAlias { internalKey = "pitchScanAngle", aliases = new[] { "pitch_scan_angle", "pitchScanAngle", "俯仰方位(度)", "俯仰方位", "传感器上下扫描范围" } };
         public KeyAlias state = new KeyAlias { internalKey = "state", aliases = new[] { "state", "flightState", "状态" } };
         public KeyAlias alarm = new KeyAlias { internalKey = "alarm", aliases = new[] { "alarm", "warning", "告警" } };
-        public KeyAlias detectorType = new KeyAlias { internalKey = "detectorType", aliases = new[] { "detector_type", "detectorType", "探测器类型" } };
+        public KeyAlias detectorType = new KeyAlias { internalKey = "detectorType", aliases = new[] { "detector_type", "detectorType", "detector_name", "detectorName", "探测器类型", "探测器名称" } };
         public KeyAlias rangeType = new KeyAlias { internalKey = "rangeType", aliases = new[] { "range_type", "rangeType", "范围类型" } };
         public KeyAlias centerPoint = new KeyAlias { internalKey = "centerPoint", aliases = new[] { "center_point", "centerPoint", "中心点" } };
         public KeyAlias radarStatus = new KeyAlias { internalKey = "radarStatus", aliases = new[] { "radar_status", "radarStatus", "雷达状态" } };

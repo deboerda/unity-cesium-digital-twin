@@ -136,7 +136,10 @@
         "aliases": [
             "detector_type",
             "detectorType",
-            "探测器类型"
+            "detector_name",
+            "detectorName",
+            "探测器类型",
+            "探测器名称"
         ]
     },
     "rangeType": {
