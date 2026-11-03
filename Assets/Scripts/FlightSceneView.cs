@@ -25,12 +25,6 @@ public class FlightSceneView : MonoBehaviour
     private float yaw;
     private float pitch;
     private Material skyMaterial;
-    private Transform ground;
-    private Material groundMaterial;
-    private Texture groundTexture;
-    private Vector2 cachedLonRange = new Vector2(97.2f, 110.5f);
-    private Vector2 cachedLatRange = new Vector2(26.2f, 34.9f);
-    private bool hasCachedGeoRange;
     private GameObject modelTemplate;
     private bool hasOrigin;
     private float originLat;
@@ -117,10 +111,10 @@ public class FlightSceneView : MonoBehaviour
         else if (!RestoreCameraView())
             ApplyDefaultCameraIfNeeded();
         EnsureRoot();
+        skyMaterial = null;
         EnsureSky();
+        HideMapGround();
         RefreshDisplayScale();
-        CacheMapSource(ResolveMap());
-        EnsureGround();
         if (flightCamera != null)
         {
             flightCamera.cullingMask = 1 << FlightLayer;
@@ -175,222 +169,36 @@ public class FlightSceneView : MonoBehaviour
 
     private void EnsureSky()
     {
-        if (skyMaterial != null)
-            return;
-        var shader = Shader.Find("Skybox/Procedural");
+        var shader = Shader.Find("HK132/FlightSkybox");
+        if (shader == null)
+            shader = Shader.Find("Skybox/Procedural");
         if (shader == null)
             return;
         skyMaterial = new Material(shader);
-        skyMaterial.SetFloat("_SunSize", 0.018f);
-        skyMaterial.SetFloat("_AtmosphereThickness", 0.55f);
-        skyMaterial.SetColor("_SkyTint", new Color(0.38f, 0.58f, 0.88f));
-        skyMaterial.SetColor("_GroundColor", HorizonSkyColor);
-        skyMaterial.SetFloat("_Exposure", 1.05f);
+        skyMaterial.SetColor("_SkyZenith", new Color(0.20f, 0.48f, 0.88f));
+        skyMaterial.SetColor("_SkyHorizon", new Color(0.70f, 0.82f, 0.94f));
+        skyMaterial.SetColor("_Ground", new Color(0.30f, 0.33f, 0.32f));
+        skyMaterial.SetColor("_SunColor", new Color(1f, 0.95f, 0.82f));
+        skyMaterial.SetVector("_SunDir", new Vector4(0.35f, 0.55f, 0.76f, 0f));
+        skyMaterial.SetFloat("_Exposure", 1.2f);
+    }
+
+    private void HideMapGround()
+    {
+        EnsureRoot();
+        if (root == null)
+            return;
+        var existing = root.Find("MapGround");
+        if (existing != null)
+            existing.gameObject.SetActive(false);
+        var leftover = GameObject.Find("MapGround");
+        if (leftover != null)
+            leftover.SetActive(false);
     }
 
     private PlaneDisplayController ResolveMap()
     {
         return FindAnyObjectByType<PlaneDisplayController>(FindObjectsInactive.Include);
-    }
-
-    private void CacheMapSource(PlaneDisplayController map)
-    {
-        if (map == null)
-            return;
-        if (map.TryGetGeoRange(out Vector2 lonRange, out Vector2 latRange))
-        {
-            cachedLonRange = lonRange;
-            cachedLatRange = latRange;
-            hasCachedGeoRange = true;
-        }
-        Texture tex = LoadMapTexture(map);
-        if (tex != null)
-            groundTexture = tex;
-    }
-
-    private void EnsureGround()
-    {
-        EnsureRoot();
-        if (ground == null)
-        {
-            var existing = root.Find("MapGround");
-            if (existing != null)
-            {
-                var leftoverCol = existing.GetComponent<Collider>();
-                if (leftoverCol != null)
-                    Destroy(leftoverCol);
-                ground = existing;
-            }
-            else
-            {
-                var go = new GameObject("MapGround");
-                go.transform.SetParent(root, false);
-                go.AddComponent<MeshFilter>();
-                go.AddComponent<MeshRenderer>();
-                ground = go.transform;
-            }
-        }
-
-        var filter = ground.GetComponent<MeshFilter>();
-        if (filter == null)
-            filter = ground.gameObject.AddComponent<MeshFilter>();
-        if (filter.sharedMesh == null || filter.sharedMesh.name != "MapGroundAtmosphere")
-            filter.sharedMesh = BuildGroundMesh();
-
-        if (groundMaterial == null)
-        {
-            var shader = Shader.Find("HK132/MapGround");
-            if (shader == null)
-                shader = Shader.Find("Unlit/Texture");
-            if (shader == null)
-                shader = Shader.Find("Sprites/Default");
-            groundMaterial = new Material(shader != null ? shader : Shader.Find("Standard"));
-            groundMaterial.color = Color.white;
-        }
-
-        var renderer = ground.GetComponent<MeshRenderer>();
-        if (renderer == null)
-            renderer = ground.gameObject.AddComponent<MeshRenderer>();
-        renderer.enabled = true;
-        renderer.sharedMaterial = groundMaterial;
-        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        renderer.receiveShadows = false;
-        renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-        renderer.allowOcclusionWhenDynamic = false;
-        ground.localRotation = Quaternion.identity;
-        SetLayer(ground.gameObject);
-        RefreshGround();
-    }
-
-    private static readonly Color HorizonSkyColor = new Color(0.70f, 0.82f, 0.90f, 1f);
-
-    private static Mesh BuildGroundMesh()
-    {
-        // 中间 ±0.5 铺真实地图；外面是同平面雾色延伸，用距离雾接天空，不按矩形淡出。
-        const int n = 49;
-        const float extent = 4.5f;
-        const float mapHalf = 0.5f;
-        var verts = new Vector3[n * n];
-        var uvs = new Vector2[n * n];
-        var norms = new Vector3[n * n];
-        for (int iz = 0; iz < n; iz++)
-        {
-            float z = Mathf.Lerp(-extent, extent, iz / (n - 1f));
-            for (int ix = 0; ix < n; ix++)
-            {
-                float x = Mathf.Lerp(-extent, extent, ix / (n - 1f));
-                int i = iz * n + ix;
-                verts[i] = new Vector3(x, 0f, z);
-                uvs[i] = new Vector2(x + mapHalf, z + mapHalf);
-                norms[i] = Vector3.up;
-            }
-        }
-        var tris = new int[(n - 1) * (n - 1) * 6];
-        int tri = 0;
-        for (int iz = 0; iz < n - 1; iz++)
-        {
-            for (int ix = 0; ix < n - 1; ix++)
-            {
-                int a = iz * n + ix;
-                int b = a + 1;
-                int c = a + n;
-                int d = c + 1;
-                tris[tri++] = a; tris[tri++] = c; tris[tri++] = b;
-                tris[tri++] = c; tris[tri++] = d; tris[tri++] = b;
-            }
-        }
-        var mesh = new Mesh { name = "MapGroundAtmosphere" };
-        mesh.vertices = verts;
-        mesh.uv = uvs;
-        mesh.normals = norms;
-        mesh.triangles = tris;
-        mesh.RecalculateBounds();
-        return mesh;
-    }
-
-    private void RefreshGround()
-    {
-        if (ground == null)
-            EnsureGround();
-        if (ground == null)
-            return;
-
-        RefreshDisplayScale();
-        CacheMapSource(ResolveMap());
-        Vector2 lonRange = hasCachedGeoRange ? cachedLonRange : new Vector2(97.2f, 110.5f);
-        Vector2 latRange = hasCachedGeoRange ? cachedLatRange : new Vector2(26.2f, 34.9f);
-
-        float lat0 = hasOrigin ? originLat : (latRange.x + latRange.y) * 0.5f;
-        float lng0 = hasOrigin ? originLng : (lonRange.x + lonRange.y) * 0.5f;
-        Vector3 sw = ToVisualRelative(lonRange.x, latRange.x, lat0, lng0);
-        Vector3 se = ToVisualRelative(lonRange.y, latRange.x, lat0, lng0);
-        Vector3 nw = ToVisualRelative(lonRange.x, latRange.y, lat0, lng0);
-        Vector3 center = (sw + se + nw + ToVisualRelative(lonRange.y, latRange.y, lat0, lng0)) * 0.25f;
-        float width = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(se.x, 0f, se.z)));
-        float depth = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(nw.x, 0f, nw.z)));
-
-        ground.position = new Vector3(center.x, 0f, center.z);
-        ground.localRotation = Quaternion.identity;
-        ground.localScale = new Vector3(width, 1f, depth);
-        ground.gameObject.SetActive(true);
-        SetLayer(ground.gameObject);
-
-        if (groundTexture == null)
-            groundTexture = LoadMapTexture(ResolveMap());
-        if (groundMaterial != null)
-        {
-            if (groundTexture != null)
-            {
-                groundMaterial.mainTexture = groundTexture;
-                groundMaterial.SetTexture("_MainTex", groundTexture);
-            }
-            groundMaterial.color = Color.white;
-            groundMaterial.SetColor("_FogColor", HorizonSkyColor);
-            groundMaterial.SetColor("_HorizonColor", HorizonSkyColor);
-            float span = Mathf.Max(width, depth);
-            groundMaterial.SetFloat("_FogDensity", 2.4f / Mathf.Max(1f, span));
-            groundMaterial.SetFloat("_EdgeSoft", 0.018f);
-            groundMaterial.SetVector("_Center", new Vector4(center.x, 0f, center.z, 0f));
-            groundMaterial.SetFloat("_Curve", 0.035f / Mathf.Max(1f, span));
-            var renderer = ground.GetComponent<MeshRenderer>();
-            if (renderer != null)
-            {
-                renderer.enabled = true;
-                renderer.sharedMaterial = groundMaterial;
-            }
-        }
-
-        var filter = ground.GetComponent<MeshFilter>();
-        if (filter != null && filter.sharedMesh != null)
-            filter.sharedMesh.RecalculateBounds();
-
-        if (flightCamera != null)
-        {
-            float span = Mathf.Max(width, depth);
-            flightCamera.nearClipPlane = Mathf.Min(flightCamera.nearClipPlane, 0.3f);
-            flightCamera.farClipPlane = Mathf.Max(flightCamera.farClipPlane, span * 8f, 250000f);
-        }
-    }
-
-    private static Texture LoadMapTexture(PlaneDisplayController map)
-    {
-        if (map != null && map.MapSprite != null && map.MapSprite.texture != null)
-            return map.MapSprite.texture;
-        if (map != null && map.MapRoot != null)
-        {
-            var images = map.MapRoot.GetComponentsInChildren<Image>(true);
-            for (int i = 0; i < images.Length; i++)
-            {
-                if (images[i] != null && images[i].sprite != null && images[i].sprite.texture != null)
-                    return images[i].sprite.texture;
-            }
-        }
-        return Resources.Load<Texture2D>("成都");
-    }
-
-    private Vector3 ToVisualRelative(double lng, double lat, float lat0, float lng0)
-    {
-        return ToVisual(RadarDetectionSystem.GeoToLocalMeters(lng, lat, 0f, lat0, lng0));
     }
 
     private void Refresh()
@@ -418,7 +226,6 @@ public class FlightSceneView : MonoBehaviour
             hasOrigin = true;
         }
         RefreshDisplayScale();
-        RefreshGround();
 
         var usedPlanes = new HashSet<string>();
         Vector3 sum = Vector3.zero;
@@ -458,7 +265,6 @@ public class FlightSceneView : MonoBehaviour
         if (map != null && map.TryGetDisplayScale(hasOrigin ? originLat : 30.55f, out _, out _, out float uniform))
         {
             uniform = Mathf.Max(1e-6f, uniform);
-            // 东西、北、高度同一比例，雷达锥才不会被拉成长条。
             unitsPerMeter = new Vector3(uniform, uniform, uniform);
         }
     }
@@ -1723,10 +1529,8 @@ public class FlightSceneView : MonoBehaviour
         float my = Input.GetAxis("Mouse Y");
         float scroll = Input.mouseScrollDelta.y;
 
-        if (Input.GetMouseButtonDown(1))
+        if (Input.GetMouseButtonDown(1) && over)
         {
-            if (!over)
-                return;
             userHasControl = true;
             if (alt)
                 zoomDragging = true;
@@ -1743,7 +1547,7 @@ public class FlightSceneView : MonoBehaviour
             userHasControl = true;
             panning = true;
         }
-        if (Input.GetMouseButtonDown(0) && alt && over)
+        if (Input.GetMouseButtonDown(0) && over)
         {
             userHasControl = true;
             orbiting = true;
@@ -1810,8 +1614,20 @@ public class FlightSceneView : MonoBehaviour
             return;
         }
 
-        if (over && Mathf.Abs(scroll) > 0.01f)
-            Dolly(scroll * flySpeed * 0.35f);
+        if (over)
+        {
+            Vector3 keys = new Vector3(Input.GetAxis("Horizontal"), 0f, Input.GetAxis("Vertical"));
+            if (Input.GetKey(KeyCode.E)) keys.y += 1f;
+            if (Input.GetKey(KeyCode.Q)) keys.y -= 1f;
+            if (keys.sqrMagnitude > 0.01f)
+            {
+                userHasControl = true;
+                float boost = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? 3f : 1f;
+                flightCamera.transform.position += flightCamera.transform.rotation * keys * flySpeed * boost * Time.unscaledDeltaTime;
+            }
+            if (Mathf.Abs(scroll) > 0.01f)
+                Dolly(scroll * flySpeed * 0.35f);
+        }
     }
 
     private void Dolly(float distance)
@@ -1830,11 +1646,28 @@ public class FlightSceneView : MonoBehaviour
 
     private bool IsPointerOverView()
     {
-        if (viewImage == null)
+        if (viewImage == null || viewImage.rectTransform == null)
             return false;
+        var rect = viewImage.rectTransform;
         var canvas = viewImage.canvas;
-        Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
-        return RectTransformUtility.RectangleContainsScreenPoint(viewImage.rectTransform, Input.mousePosition, eventCamera);
+        Camera uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        if (RectTransformUtility.RectangleContainsScreenPoint(rect, Input.mousePosition, uiCamera))
+            return true;
+        if (RectTransformUtility.RectangleContainsScreenPoint(rect, Input.mousePosition, null))
+            return true;
+
+        var corners = new Vector3[4];
+        rect.GetWorldCorners(corners);
+        Vector2 a = RectTransformUtility.WorldToScreenPoint(uiCamera, corners[0]);
+        Vector2 b = RectTransformUtility.WorldToScreenPoint(uiCamera, corners[2]);
+        float minX = Mathf.Min(a.x, b.x);
+        float maxX = Mathf.Max(a.x, b.x);
+        float minY = Mathf.Min(a.y, b.y);
+        float maxY = Mathf.Max(a.y, b.y);
+        Vector2 m = Input.mousePosition;
+        return m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY;
     }
 
     private static bool IsTyping()
