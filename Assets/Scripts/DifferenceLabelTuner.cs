@@ -42,11 +42,17 @@ public class DifferenceLabelTuner : MonoBehaviour
         Load();
     }
 
-    private void Update()
+    public void Toggle()
     {
-        if (Input.GetKeyDown(KeyCode.F3))
-            open = !open;
+        open = !open;
     }
+
+    public bool ContainsMouse()
+    {
+        return open && RadarStationTuner.GuiContainsMouse(window);
+    }
+
+    private void Update() { }
 
     private void OnGUI()
     {
@@ -59,12 +65,12 @@ public class DifferenceLabelTuner : MonoBehaviour
     {
         WheelScroll();
         scroll = GUILayout.BeginScrollView(scroll, false, true, GUILayout.ExpandHeight(true));
-        GUILayout.Label("位置  相对飞机（视觉单位）");
-        offsetRight = Slider("左右", offsetRight, -40f, 40f);
-        offsetUp = Slider("上下", offsetUp, -10f, 40f);
-        offsetForward = Slider("前后", offsetForward, -40f, 40f);
+        GUILayout.Label("位置  相对飞机（屏幕像素）");
+        offsetRight = Slider("左右", offsetRight, -120f, 120f);
+        offsetUp = Slider("上下", offsetUp, -80f, 160f);
+        offsetForward = Slider("前后", offsetForward, -120f, 120f);
         GUILayout.Space(6f);
-        GUILayout.Label("文字比例");
+        GUILayout.Label("文字大小（相对屏幕）");
         textScale = ScaleField(textScale);
         GUILayout.Space(6f);
         GUILayout.Label("轮播显示秒数");
@@ -93,7 +99,7 @@ public class DifferenceLabelTuner : MonoBehaviour
     {
         GUILayout.BeginHorizontal();
         GUILayout.Label("比例", GUILayout.Width(36f));
-        float slid = GUILayout.HorizontalSlider(Mathf.Clamp(value, 0.2f, 6f), 0.2f, 6f);
+        float slid = GUILayout.HorizontalSlider(Mathf.Clamp(value, 0.02f, 6f), 0.02f, 6f);
         GUI.SetNextControlName("f3_label_scale");
         bool focused = GUI.GetNameOfFocusedControl() == "f3_label_scale";
         if (!focused)
@@ -105,7 +111,7 @@ public class DifferenceLabelTuner : MonoBehaviour
         string edited = GUILayout.TextField(scaleText ?? value.ToString("0.###", CultureInfo.InvariantCulture), GUILayout.Width(64f));
         scaleText = edited;
         if (focused && float.TryParse(edited, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-            value = Mathf.Max(0.05f, parsed);
+            value = Mathf.Max(0.02f, parsed);
         GUILayout.EndHorizontal();
         return value;
     }

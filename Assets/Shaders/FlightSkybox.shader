@@ -62,8 +62,8 @@ Shader "HK132/FlightSkybox"
 
                 float3 sun = normalize(_SunDir.xyz);
                 float sunDot = saturate(dot(dir, sun));
-                col += _SunColor * pow(sunDot, 180.0) * 1.4;
-                col += _SunColor * pow(sunDot, 8.0) * 0.18;
+                col += _SunColor * pow(sunDot, 220.0) * 1.15;
+                col += _SunColor * pow(sunDot, 6.0) * 0.12;
 
                 return fixed4(col * _Exposure, 1);
             }

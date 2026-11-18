@@ -7,7 +7,7 @@ import math
 import sys
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 
@@ -15,16 +15,16 @@ from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
 
-LON_MIN = 97.2
-LAT_MIN = 26.2
-LON_MAX = 110.5
-LAT_MAX = 34.9
-ZOOM = 10
+LON_MIN = 103.66956
+LAT_MIN = 30.46133
+LON_MAX = 104.50156
+LAT_MAX = 30.88204
+ZOOM = 15
 TILE_SIZE = 256
-MAX_WORKERS = 12
-RETRIES = 4
+MAX_WORKERS = 8
+RETRIES = 3
 OUT_DIR = Path(r"E:\UNITYproject\HK132CWIN7\Assets\Pictures")
-STEM = "卫星地图_SW97.2_NE110.5"
+STEM = "飞行范围插图"
 
 TILE_URLS = [
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -34,11 +34,6 @@ UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-
-# Direct connection is faster and more stable than the local proxy for this host.
-PROXY_HANDLER = urllib.request.ProxyHandler({})
-OPENER = urllib.request.build_opener(PROXY_HANDLER)
-
 
 def lonlat_to_tile_frac(lon: float, lat: float, zoom: int) -> tuple[float, float]:
     n = 2.0 ** zoom
@@ -58,15 +53,21 @@ def fetch_tile(z: int, x: int, y: int) -> bytes:
             headers={"User-Agent": UA, "Referer": "https://www.arcgis.com/"},
         )
         try:
-            with OPENER.open(req, timeout=20) as resp:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({
+                    "http": "http://127.0.0.1:8848",
+                    "https": "http://127.0.0.1:8848",
+                })
+            )
+            with opener.open(req, timeout=20) as resp:
                 data = resp.read()
             if len(data) > 800 and data[:2] == b"\xff\xd8":
                 return data
             last_err = RuntimeError(f"bad tile bytes={len(data)} magic={data[:8]!r}")
         except Exception as exc:  # noqa: BLE001
             last_err = exc
-        time.sleep(0.35 * (attempt + 1))
-    raise RuntimeError(f"tile z{z}/{y}/{x} failed: {last_err}")
+        time.sleep(0.2 * (attempt + 1))
+    return None
 
 
 def main() -> int:
@@ -83,15 +84,18 @@ def main() -> int:
     mosaic = Image.new("RGB", (cols * TILE_SIZE, rows * TILE_SIZE))
     done = 0
     t0 = time.time()
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {pool.submit(fetch_tile, ZOOM, tx, ty): (tx, ty) for tx, ty in jobs}
         for fut in as_completed(futures):
             tx, ty = futures[fut]
             data = fut.result()
-            tile = Image.open(BytesIO(data)).convert("RGB")
+            if data:
+                tile = Image.open(BytesIO(data)).convert("RGB")
+            else:
+                tile = Image.new("RGB", (TILE_SIZE, TILE_SIZE), (40, 50, 40))
             mosaic.paste(tile, ((tx - tx0) * TILE_SIZE, (ty - ty0) * TILE_SIZE))
             done += 1
-            if done == 1 or done % 80 == 0 or done == len(jobs):
+            if done == 1 or done % 25 == 0 or done == len(jobs):
                 elapsed = time.time() - t0
                 print(f"  {done}/{len(jobs)}  {elapsed:.1f}s", flush=True)
 

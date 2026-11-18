@@ -54,7 +54,7 @@ public class PlaneDisplayController : MonoBehaviour
     private float planeIconScale = 4f;
     [Tooltip("图标机头在贴图上朝右。90 使航向 0 竖直向上，航向增大为顺时针。")]
     [SerializeField] private float planeIconZeroHeadingOffset = 90f;
-    [SerializeField] [Min(0.2f)] private float trailWidth = 3f;
+    [SerializeField] [Min(0.01f)] private float trailWidth = 3f;
     [Tooltip("航迹采样间隔（米）。二维三维共用；值越小轨迹越连续，值越大越省性能。")]
     [SerializeField] private float trailSampleMeters = 50f;
     [SerializeField] private float trailPointDistanceThreshold = 4f;
@@ -140,7 +140,7 @@ public class PlaneDisplayController : MonoBehaviour
         get => trailWidth;
         set
         {
-            trailWidth = Mathf.Max(0.2f, value);
+            trailWidth = Mathf.Max(0.01f, value);
             ApplyTrailWidth();
         }
     }
@@ -229,6 +229,11 @@ public class PlaneDisplayController : MonoBehaviour
 
     private void LateUpdate()
     {
+        var inset = mapRoot != null ? mapRoot.Find("飞行范围插图") : null;
+        if (inset != null)
+            inset.SetAsFirstSibling();
+        if (planeLayerRoot != null)
+            planeLayerRoot.SetAsLastSibling();
         if (mapOverlayRoot != null)
             mapOverlayRoot.SetAsLastSibling();
         ApplyIconScreenScale();
@@ -867,12 +872,11 @@ public class PlaneDisplayController : MonoBehaviour
         planeLayerRoot.localPosition = pos;
         var inset = mapRoot.Find("飞行范围插图");
         if (inset != null)
-        {
             inset.SetAsFirstSibling();
-            planeLayerRoot.SetSiblingIndex(1);
-        }
-        else
-            planeLayerRoot.SetAsFirstSibling();
+        planeLayerRoot.SetAsLastSibling();
+        var overlay = mapRoot.Find("MapOverlay");
+        if (overlay != null)
+            overlay.SetAsLastSibling();
         return planeLayerRoot;
     }
 

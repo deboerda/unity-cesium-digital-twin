@@ -115,3 +115,14 @@ InitTestScene*.unity*
 
 # Codely Bridge 本机心跳（端口会变）；包本身 .codely.packages/ 要进仓库
 .com-unity-codely.json
+
+# 高清瓦片下载缓存与预览，不进仓库
+/Assets/Pictures/_hd_tile_cache/
+/Assets/Pictures/_hd_tile_cache.meta
+/Assets/Pictures/_hd_parts/
+/Assets/Pictures/_hd_parts.meta
+/Assets/Pictures/_hd_probe.jpg
+/Assets/Pictures/_hd_probe.jpg.meta
+/Tools/_probe/
+/Tools/_preview_inset.jpg
+/Tools/_preview_oldarea.jpg

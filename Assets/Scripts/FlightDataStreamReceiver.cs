@@ -1818,7 +1818,10 @@ public class FlightDataStreamReceiver : MonoBehaviour
         string detector = GetDetectorName(token) ?? GetDetectorName(data);
         if (detector != null) state.detectorType = detector;
         string rangeType = GetMappedString(token, "range_type") ?? GetMappedString(data, "range_type");
-        if (rangeType != null) state.rangeType = rangeType;
+        if (!string.IsNullOrWhiteSpace(rangeType))
+            state.rangeType = rangeType;
+        else if (RadarDetectionSystem.IsSphericalRadar(detector) || RadarDetectionSystem.IsSphericalRadar(state.detectorType))
+            state.rangeType = string.IsNullOrWhiteSpace(state.rangeType) ? "球形" : state.rangeType;
         float? detectRange = GetMappedFloat(token, "detect_range") ?? GetMappedFloat(data, "detect_range");
         if (detectRange.HasValue) state.detectRange = detectRange.Value;
         float? yawAngle = GetMappedFloat(token, "yaw_angle", "扫描中心(度)", "传感器左右偏转角") ?? GetMappedFloat(data, "yaw_angle", "扫描中心(度)", "传感器左右偏转角");
@@ -1870,7 +1873,10 @@ public class FlightDataStreamReceiver : MonoBehaviour
         sensor.detectorType = detector;
         if (!string.IsNullOrWhiteSpace(flightTime) && IsNewerFlightTime(flightTime, sensor.flightTime))
             sensor.flightTime = flightTime;
-        if (rangeType != null) sensor.rangeType = rangeType;
+        if (!string.IsNullOrWhiteSpace(rangeType))
+            sensor.rangeType = rangeType;
+        else if (RadarDetectionSystem.IsSphericalRadar(detector) && string.IsNullOrWhiteSpace(sensor.rangeType))
+            sensor.rangeType = "球形";
         if (detectRange.HasValue) sensor.detectRange = detectRange.Value;
         if (yawAngle.HasValue) { sensor.yawAngle = yawAngle.Value; sensor.hasYawAngle = true; }
         if (pitchAngle.HasValue) { sensor.pitchAngle = pitchAngle.Value; sensor.hasPitchAngle = true; }

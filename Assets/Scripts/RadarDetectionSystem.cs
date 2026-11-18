@@ -241,16 +241,21 @@ public class RadarDetectionSystem : MonoBehaviour
 
     public static bool IsSphericalRadar(string rangeType)
     {
-        if (string.IsNullOrWhiteSpace(rangeType))
-            return false;
-        return rangeType.IndexOf("球", StringComparison.Ordinal) >= 0
-            || rangeType.IndexOf("sphere", StringComparison.OrdinalIgnoreCase) >= 0
-            || rangeType.IndexOf("omni", StringComparison.OrdinalIgnoreCase) >= 0;
+        return ContainsSphereToken(rangeType);
     }
 
     public static bool IsSphericalRadar(FlightDataStreamReceiver.TrackTimetableState s)
     {
-        return s != null && IsSphericalRadar(s.rangeType);
+        return s != null && (ContainsSphereToken(s.rangeType) || ContainsSphereToken(s.detectorType));
+    }
+
+    private static bool ContainsSphereToken(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        return text.IndexOf("球", StringComparison.Ordinal) >= 0
+            || text.IndexOf("sphere", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("omni", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     public static bool IsSphericalRadar(SensorInfo sensor) => sensor.spherical;
@@ -889,14 +894,11 @@ public class RadarDetectionSystem : MonoBehaviour
     {
         if (mapController == null)
             return Vector3.zero;
-        if (!mapController.TryGetDisplayScale(sensor.lat, out _, out _, out float uniform) || uniform < 1e-6f)
-            return Vector3.zero;
-        float alongUnits = RadarStationTuner.Instance != null
+        float meters = RadarStationTuner.Instance != null
             ? RadarStationTuner.Instance.Offset3D(sensor.mountSign)
-            : (FlightSceneView.Active != null ? FlightSceneView.Active.ModelLength * 0.45f : VisualNoseOffsetUnits) * sensor.mountSign;
-        if (Mathf.Abs(alongUnits) < 0.01f)
+            : 0f;
+        if (Mathf.Abs(meters) < 0.01f)
             return Vector3.zero;
-        float meters = alongUnits / uniform;
         float headingRad = sensor.heading * Mathf.Deg2Rad;
         return new Vector3(Mathf.Sin(headingRad) * meters, 0f, Mathf.Cos(headingRad) * meters);
     }

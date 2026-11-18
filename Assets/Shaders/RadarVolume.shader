@@ -10,7 +10,7 @@ Shader "HK132/RadarVolume"
     SubShader
     {
         Tags { "Queue"="Transparent" "RenderType"="Transparent" "IgnoreProjector"="True" }
-        Cull Back
+        Cull Off
         Lighting Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha

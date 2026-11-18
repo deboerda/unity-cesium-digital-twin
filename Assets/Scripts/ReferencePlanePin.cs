@@ -74,11 +74,18 @@ public class ReferencePlanePin : MonoBehaviour
             DestroyMarker();
     }
 
+    public void TogglePanel()
+    {
+        panelOpen = !panelOpen;
+    }
+
+    public bool ContainsMouse()
+    {
+        return panelOpen && RadarStationTuner.GuiContainsMouse(panel);
+    }
+
     private void Update()
     {
-        if (Application.isPlaying && Input.GetKeyDown(KeyCode.F4))
-            panelOpen = !panelOpen;
-
         Refresh();
     }
 
@@ -126,7 +133,7 @@ public class ReferencePlanePin : MonoBehaviour
         if (displayNowEarly != null)
         {
             displayNowEarly.PlaneIconScale = NumberRow("plane", "飞机(地图)", displayNowEarly.PlaneIconScale, 0.01f, 8f);
-            displayNowEarly.TrailMapWidth = NumberRow("trail2d", "二维轨迹", displayNowEarly.TrailMapWidth, 0.05f, 24f);
+            displayNowEarly.TrailMapWidth = NumberRow("trail2d", "二维轨迹", displayNowEarly.TrailMapWidth, 0.01f, 24f);
             displayNowEarly.TrailSampleMeters = NumberRow("trailSample", "采样间隔", displayNowEarly.TrailSampleMeters, 5f, 5000f);
             displayNowEarly.TrailMaxPoints = NumberRow("trailMaxPts", "最大点数", displayNowEarly.TrailMaxPoints, 100f, 12000f);
             GUILayout.Label($"轨迹最长覆盖 {displayNowEarly.TrailSampleMeters * displayNowEarly.TrailMaxPoints / 1000f:0.0} km");
@@ -148,9 +155,11 @@ public class ReferencePlanePin : MonoBehaviour
         var flight = FlightSceneView.Active;
         if (flight != null)
         {
-            flight.TrailWidthMeters = NumberRow("trail3d", "三维轨迹", flight.TrailWidthMeters, 0.2f, 80f);
-            flight.SetModelLength(NumberRow("model3d", "三维机模", flight.ModelLength, 0.2f, 80f));
-            flight.RadarEdgePixels = NumberRow("line3d", "三维线宽", flight.RadarEdgePixels, 0.2f, 6f);
+            flight.TrailWidthMeters = NumberRow("trail3d", "三维轨迹", flight.TrailWidthMeters, 0.01f, 80f);
+            flight.ModelLengthMeters = NumberRow("model3d", "机模长度(米)", flight.ModelLengthMeters, 1f, 80f);
+            flight.ApplyModelScale();
+            flight.RadarEdgePixels = NumberRow("line3d", "雷达描边(像素)", flight.RadarEdgePixels, 0.02f, 8f);
+            flight.RadarFillAlpha = NumberRow("fill3d", "雷达透明度", flight.RadarFillAlpha, 0.01f, 0.8f);
             flight.AxisGizmoWidth = NumberRow("axisW", "坐标轴线宽", flight.AxisGizmoWidth, 0.5f, 12f);
         }
 
@@ -418,7 +427,8 @@ public class ReferencePlanePin : MonoBehaviour
         if (FlightSceneView.Active != null)
         {
             store.planeIcon.radarLine3D = FlightSceneView.Active.RadarEdgePixels;
-            store.planeIcon.modelLength = FlightSceneView.Active.ModelLength;
+            store.planeIcon.radarFillAlpha = FlightSceneView.Active.RadarFillAlpha;
+            store.planeIcon.modelLength = FlightSceneView.Active.ModelLengthMeters;
             store.planeIcon.trailWidth3D = FlightSceneView.Active.TrailWidthMeters;
             store.planeIcon.axisGizmoWidth = FlightSceneView.Active.AxisGizmoWidth;
         }

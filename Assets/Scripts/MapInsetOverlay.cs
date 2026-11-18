@@ -1,25 +1,51 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 /// <summary>
 /// 把一块更高精度的卫星图按经纬度叠在大底图上。
-/// 飞行范围图约 2 m/像素，大图约 132 m/像素；放大后主要飞行区走这张插图层。
+/// 范围必须与贴图实际覆盖的经纬度一致，不能把旧图拉伸。
 /// </summary>
 [ExecuteAlways]
 [DisallowMultipleComponent]
 [RequireComponent(typeof(RectTransform))]
 public class MapInsetOverlay : MonoBehaviour
 {
-    [Header("地理范围")]
-    [SerializeField] private double lonMin = 103.91916083;
-    [SerializeField] private double latMin = 30.58753045;
-    [SerializeField] private double lonMax = 104.25195738;
-    [SerializeField] private double latMax = 30.75583896;
+    [Header("地理范围（须与贴图一致）")]
+    [SerializeField] private double lonMin = 103.66956;
+    [SerializeField] private double latMin = 30.46133;
+    [SerializeField] private double lonMax = 104.50156;
+    [SerializeField] private double latMax = 30.88204;
 
     private PlaneDisplayController display;
     private RectTransform rect;
 
+    public double LonMin => lonMin;
+    public double LatMin => latMin;
+    public double LonMax => lonMax;
+    public double LatMax => latMax;
+    public Texture OverlayTexture
+    {
+        get
+        {
+            var img = GetComponent<UnityEngine.UI.Image>();
+            return img != null && img.sprite != null ? img.sprite.texture : null;
+        }
+    }
+
+    public void SetGeoRange(double west, double south, double east, double north)
+    {
+        lonMin = west;
+        latMin = south;
+        lonMax = east;
+        latMax = north;
+        Apply();
+    }
+
     private void OnEnable()
+    {
+        Apply();
+    }
+
+    private void Start()
     {
         Apply();
     }
@@ -43,7 +69,7 @@ public class MapInsetOverlay : MonoBehaviour
     public void Apply()
     {
         if (display == null)
-            display = FindAnyObjectByType<PlaneDisplayController>();
+            display = FindAnyObjectByType<PlaneDisplayController>(FindObjectsInactive.Include);
         if (display == null || display.MapRoot == null)
             return;
 
@@ -67,9 +93,16 @@ public class MapInsetOverlay : MonoBehaviour
         rect.localScale = Vector3.one;
         rect.anchoredPosition = (min + max) * 0.5f;
         rect.sizeDelta = max - min;
+        var img = GetComponent<UnityEngine.UI.Image>();
+        if (img != null)
+            img.raycastTarget = false;
+        // 插图必须垫底，飞机/雷达/轨迹在上面。
         rect.SetAsFirstSibling();
         var planes = display.MapRoot.Find("PlaneIcons");
+        var overlay = display.MapRoot.Find("MapOverlay");
         if (planes != null)
-            planes.SetSiblingIndex(1);
+            planes.SetAsLastSibling();
+        if (overlay != null)
+            overlay.SetAsLastSibling();
     }
 }

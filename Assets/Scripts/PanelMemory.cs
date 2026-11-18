@@ -98,8 +98,21 @@ public static class PanelMemory
         public float ringThickness;
         public float radarLine2D = 1.5f;
         public float radarLine3D = 1.15f;
-        public float modelLength = 18f;
+        public float radarFillAlpha = 0.16f;
+        public float modelLength = 16f;
         public float axisGizmoWidth = 3.5f;
+    }
+
+    [Serializable]
+    public class ChaseCamTune
+    {
+        public bool saved;
+        public float back = 80f;
+        public float height = 22f;
+        public float side;
+        public float lookPitch = 8f;
+        public float lookYaw;
+        public float fov = 55f;
     }
 
     [Serializable]
@@ -157,6 +170,7 @@ public static class PanelMemory
         public PlaneIconTune planeIcon = new PlaneIconTune();
         public MapViewTune mapView = new MapViewTune();
         public FlightViewTune flightView = new FlightViewTune();
+        public ChaseCamTune chaseCam = new ChaseCamTune();
     }
 
     public static string FilePath => Path.Combine(Application.persistentDataPath, FileName);

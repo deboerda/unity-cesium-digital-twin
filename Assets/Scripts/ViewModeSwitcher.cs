@@ -223,8 +223,8 @@ public class ViewModeSwitcher : MonoBehaviour
             flightCamera.clearFlags = CameraClearFlags.SolidColor;
             flightCamera.backgroundColor = new Color(0.05f, 0.08f, 0.12f, 1f);
             flightCamera.fieldOfView = 50f;
-            flightCamera.nearClipPlane = 0.3f;
-            flightCamera.farClipPlane = 250000f;
+            flightCamera.nearClipPlane = 0.02f;
+            flightCamera.farClipPlane = 4000000f;
             flightCamera.cullingMask = 1 << 3;
             flightCamera.targetTexture = flightTarget;
             flightCamera.depth = -2;

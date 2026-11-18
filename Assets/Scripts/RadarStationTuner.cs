@@ -12,9 +12,9 @@ public class RadarStationTuner : MonoBehaviour
     public float front2D = 26f;
     public float mid2D;
     public float rear2D = -26f;
-    public float front3D = 10f;
-    public float mid3D = 2f;
-    public float rear3D = -6f;
+    public float front3D = 8f;
+    public float mid3D;
+    public float rear3D = -8f;
     public float frontUp;
     public float midUp;
     public float rearUp;
@@ -66,10 +66,22 @@ public class RadarStationTuner : MonoBehaviour
         return midUp;
     }
 
-    private void Update()
+    public void Toggle()
     {
-        if (Input.GetKeyDown(KeyCode.F2))
-            open = !open;
+        open = !open;
+    }
+
+    public bool ContainsMouse()
+    {
+        return open && GuiContainsMouse(window);
+    }
+
+    public static bool GuiContainsMouse(Rect guiRect)
+    {
+        Vector2 m = Event.current != null
+            ? Event.current.mousePosition
+            : new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+        return guiRect.Contains(m);
     }
 
     private void OnGUI()
@@ -89,15 +101,15 @@ public class RadarStationTuner : MonoBehaviour
         mid2D = Slider("2d-mid", "中", mid2D, -200f, 200f);
         rear2D = Slider("2d-rear", "后", rear2D, -200f, 200f);
         GUILayout.Space(6f);
-        GUILayout.Label("三维 前后  正值朝机头");
-        front3D = Slider("3d-front", "前", front3D, -30f, 30f);
-        mid3D = Slider("3d-mid", "中", mid3D, -30f, 30f);
-        rear3D = Slider("3d-rear", "后", rear3D, -30f, 30f);
+        GUILayout.Label("三维 前后(米)  正值朝机头");
+        front3D = Slider("3d-front", "前", front3D, -40f, 40f);
+        mid3D = Slider("3d-mid", "中", mid3D, -40f, 40f);
+        rear3D = Slider("3d-rear", "后", rear3D, -40f, 40f);
         GUILayout.Space(4f);
-        GUILayout.Label("三维 上下  正值向上");
-        frontUp = Slider("up-front", "前", frontUp, -20f, 20f);
-        midUp = Slider("up-mid", "中", midUp, -20f, 20f);
-        rearUp = Slider("up-rear", "后", rearUp, -20f, 20f);
+        GUILayout.Label("三维 上下(米)  正值向上");
+        frontUp = Slider("up-front", "前", frontUp, -30f, 30f);
+        midUp = Slider("up-mid", "中", midUp, -30f, 30f);
+        rearUp = Slider("up-rear", "后", rearUp, -30f, 30f);
         GUILayout.EndScrollView();
         if (GUILayout.Button("保存", GUILayout.Height(24f)))
             Save();

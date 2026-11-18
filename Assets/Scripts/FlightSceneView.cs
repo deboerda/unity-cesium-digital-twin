@@ -25,14 +25,41 @@ public class FlightSceneView : MonoBehaviour
     private float yaw;
     private float pitch;
     private Material skyMaterial;
+    private Transform globe;
+    private Transform mapPatch;
+    private Transform hdPatch;
+    private Material globeMaterial;
+    private Material mapGlobeMaterial;
+    private Material hdGlobeMaterial;
+    private Texture groundTexture;
+    private Texture hdTexture;
     private GameObject modelTemplate;
     private bool hasOrigin;
     private float originLat;
     private float originLng;
     private float nextRefresh;
     private readonly Dictionary<string, Transform> planes = new Dictionary<string, Transform>();
+    private readonly Dictionary<string, Transform> followRigs = new Dictionary<string, Transform>();
+    private readonly Dictionary<string, Camera> chaseCams = new Dictionary<string, Camera>();
+    private readonly Dictionary<string, float> planeHeadings = new Dictionary<string, float>();
+    private readonly List<string> followDropdownIds = new List<string>();
+    private Dropdown followDropdown;
+    private Text followHint;
+    private bool followLocked;
+    private string followTrackId;
+    private bool ignoreFollowDropdown;
+    private bool followSnap = true;
+    private Vector3 followSmoothVel;
+    private float followFovVel;
+    private Vector3 unlockedPos;
+    private float unlockedYaw;
+    private float unlockedPitch;
+    private float unlockedOrbitDistance = 80f;
+    private Vector3 unlockedPivot;
     private readonly Dictionary<string, LineRenderer> tracks = new Dictionary<string, LineRenderer>();
     private readonly Dictionary<string, MeshFilter> volumes = new Dictionary<string, MeshFilter>();
+    private readonly Dictionary<string, Vector3> volumeApexBuilt = new Dictionary<string, Vector3>();
+    private readonly Dictionary<string, string> volumeTrackId = new Dictionary<string, string>();
     private readonly Dictionary<string, LineRenderer> hits = new Dictionary<string, LineRenderer>();
     private readonly Dictionary<string, LineRenderer> volumeEdges = new Dictionary<string, LineRenderer>();
     private readonly List<VolumeOutlineJob> outlineJobs = new List<VolumeOutlineJob>();
@@ -54,19 +81,29 @@ public class FlightSceneView : MonoBehaviour
 
     public static FlightSceneView Active { get; private set; }
     public float RadarEdgePixels = 1.15f;
+    public float RadarFillAlpha = 0.16f;
     public float TrailWidthMeters = 12f;
     public float AxisGizmoWidth = 3.5f;
-    public float ModelLength { get; private set; } = 18f;
-    private float appliedModelLength = 18f;
+    public float ModelLength { get; private set; } = 0.02f;
+    public float ModelLengthMeters { get; set; } = 16f;
+    private float appliedModelLength = 0.02f;
 
     public bool LabelsVisible => labelsVisible;
 
     public void SetModelLength(float length)
     {
-        length = Mathf.Clamp(length, 0.2f, 80f);
-        float ratio = length / Mathf.Max(0.01f, appliedModelLength);
-        ModelLength = length;
-        appliedModelLength = length;
+        ApplyModelScale();
+    }
+
+    public void ApplyModelScale()
+    {
+        float meters = Mathf.Clamp(ModelLengthMeters, 1f, 80f);
+        ModelLengthMeters = meters;
+        float visual = meters * Mathf.Max(1e-8f, unitsPerMeter.x, unitsPerMeter.z);
+        visual = Mathf.Max(1e-5f, visual);
+        float ratio = visual / Mathf.Max(1e-8f, appliedModelLength);
+        ModelLength = visual;
+        appliedModelLength = visual;
         if (Mathf.Abs(ratio - 1f) < 0.001f)
             return;
         foreach (var kv in planes)
@@ -74,6 +111,16 @@ public class FlightSceneView : MonoBehaviour
             if (kv.Value != null)
                 kv.Value.localScale *= ratio;
         }
+    }
+
+    public void ReleasePointerCapture()
+    {
+        flying = false;
+        panning = false;
+        orbiting = false;
+        zoomDragging = false;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
     }
 
     public void SetLabelsVisible(bool visible)
@@ -96,10 +143,12 @@ public class FlightSceneView : MonoBehaviour
         Active = this;
         flightCamera = camera;
         var saved = PanelMemory.Load();
-        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.radarLine3D > 0.05f)
+        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.radarLine3D > 0.01f)
             RadarEdgePixels = saved.planeIcon.radarLine3D;
-        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.modelLength > 0.15f)
-            SetModelLength(saved.planeIcon.modelLength);
+        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.radarFillAlpha > 0.001f)
+            RadarFillAlpha = Mathf.Clamp(saved.planeIcon.radarFillAlpha, 0.01f, 0.9f);
+        if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.modelLength > 0.5f)
+            ModelLengthMeters = Mathf.Clamp(saved.planeIcon.modelLength, 1f, 80f);
         if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.trailWidth3D > 0.2f)
             TrailWidthMeters = saved.planeIcon.trailWidth3D;
         if (saved.planeIcon != null && saved.planeIcon.saved && saved.planeIcon.axisGizmoWidth > 0.4f)
@@ -113,8 +162,9 @@ public class FlightSceneView : MonoBehaviour
         EnsureRoot();
         skyMaterial = null;
         EnsureSky();
-        HideMapGround();
+        EnsureGlobe();
         RefreshDisplayScale();
+        RefreshGlobe();
         if (flightCamera != null)
         {
             flightCamera.cullingMask = 1 << FlightLayer;
@@ -123,20 +173,37 @@ public class FlightSceneView : MonoBehaviour
             if (sky == null)
                 sky = flightCamera.gameObject.AddComponent<Skybox>();
             sky.material = skyMaterial;
+            EnsureFlightLight();
+            QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
+            QualitySettings.globalTextureMipmapLimit = 0;
+            ApplyClipPlanes(flightCamera);
             Vector3 euler = flightCamera.transform.eulerAngles;
             yaw = euler.y;
             pitch = euler.x > 180f ? euler.x - 360f : euler.x;
         }
+        EnsureFollowDropdown();
     }
 
     private void Update()
     {
         if (flightCamera == null || !flightCamera.enabled)
             return;
-        Navigate();
+        bool showFollowUi = viewImage != null && viewImage.gameObject.activeInHierarchy;
+        if (followDropdown != null)
+            followDropdown.gameObject.SetActive(showFollowUi);
+        if (followHint != null)
+            followHint.gameObject.SetActive(showFollowUi);
+        HandleFollowHotkey();
+        if (!followLocked)
+            Navigate();
+        TickAircraftPoses();
+        ApplyFollowCamera();
+        PinTrailsToAircraft();
         FaceLabels();
+        StickRadarToAircraft();
         UpdateVolumeOutlines();
-        PersistCameraIfNeeded();
+        if (!followLocked)
+            PersistCameraIfNeeded();
         if (Time.unscaledTime < nextRefresh)
             return;
         nextRefresh = Time.unscaledTime + 0.2f;
@@ -175,25 +242,258 @@ public class FlightSceneView : MonoBehaviour
         if (shader == null)
             return;
         skyMaterial = new Material(shader);
-        skyMaterial.SetColor("_SkyZenith", new Color(0.20f, 0.48f, 0.88f));
-        skyMaterial.SetColor("_SkyHorizon", new Color(0.70f, 0.82f, 0.94f));
-        skyMaterial.SetColor("_Ground", new Color(0.30f, 0.33f, 0.32f));
-        skyMaterial.SetColor("_SunColor", new Color(1f, 0.95f, 0.82f));
-        skyMaterial.SetVector("_SunDir", new Vector4(0.35f, 0.55f, 0.76f, 0f));
-        skyMaterial.SetFloat("_Exposure", 1.2f);
+        skyMaterial.SetColor("_SkyZenith", new Color(0.16f, 0.46f, 0.92f));
+        skyMaterial.SetColor("_SkyHorizon", new Color(0.62f, 0.80f, 0.94f));
+        skyMaterial.SetColor("_Ground", new Color(0.18f, 0.24f, 0.16f));
+        skyMaterial.SetColor("_SunColor", new Color(1f, 0.96f, 0.86f));
+        skyMaterial.SetVector("_SunDir", new Vector4(0.38f, 0.62f, 0.55f, 0f));
+        skyMaterial.SetFloat("_Exposure", 1.12f);
     }
 
-    private void HideMapGround()
+    private static readonly Color GlobeGreen = new Color(0.16f, 0.22f, 0.14f, 1f);
+
+    private void EnsureGlobe()
     {
         EnsureRoot();
         if (root == null)
             return;
-        var existing = root.Find("MapGround");
-        if (existing != null)
-            existing.gameObject.SetActive(false);
-        var leftover = GameObject.Find("MapGround");
+        var leftover = root.Find("MapGround");
         if (leftover != null)
-            leftover.SetActive(false);
+            leftover.gameObject.SetActive(false);
+
+        if (globe == null)
+        {
+            var existing = root.Find("EarthGlobe");
+            globe = existing != null ? existing : new GameObject("EarthGlobe").transform;
+            globe.SetParent(root, false);
+            if (globe.GetComponent<MeshFilter>() == null)
+                globe.gameObject.AddComponent<MeshFilter>().sharedMesh = GlobeSphereMesh();
+            if (globe.GetComponent<MeshRenderer>() == null)
+                globe.gameObject.AddComponent<MeshRenderer>();
+        }
+        if (globeMaterial == null)
+        {
+            var sh = Shader.Find("Unlit/Color");
+            globeMaterial = new Material(sh != null ? sh : Shader.Find("Sprites/Default"));
+            globeMaterial.color = GlobeGreen;
+        }
+        var globeR = globe.GetComponent<MeshRenderer>();
+        globeR.sharedMaterial = globeMaterial;
+        globeR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        globeR.receiveShadows = false;
+        SetLayer(globe.gameObject);
+        globe.gameObject.SetActive(true);
+
+        if (mapPatch == null)
+        {
+            var existing = root.Find("MapGlobePatch");
+            mapPatch = existing != null ? existing : new GameObject("MapGlobePatch").transform;
+            mapPatch.SetParent(root, false);
+            if (mapPatch.GetComponent<MeshFilter>() == null)
+                mapPatch.gameObject.AddComponent<MeshFilter>();
+            if (mapPatch.GetComponent<MeshRenderer>() == null)
+                mapPatch.gameObject.AddComponent<MeshRenderer>();
+        }
+        if (mapGlobeMaterial == null)
+        {
+            var sh = Shader.Find("HK132/MapGlobe");
+            if (sh == null)
+                sh = Shader.Find("Unlit/Texture");
+            mapGlobeMaterial = new Material(sh != null ? sh : Shader.Find("Sprites/Default"));
+            mapGlobeMaterial.SetColor("_EdgeColor", GlobeGreen);
+            mapGlobeMaterial.SetFloat("_EdgeSoft", 0.055f);
+            mapGlobeMaterial.color = Color.white;
+        }
+        var patchR = mapPatch.GetComponent<MeshRenderer>();
+        patchR.sharedMaterial = mapGlobeMaterial;
+        patchR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        patchR.receiveShadows = false;
+        SetLayer(mapPatch.gameObject);
+        mapPatch.gameObject.SetActive(true);
+
+        if (hdPatch == null)
+        {
+            var existing = root.Find("MapGlobeHdPatch");
+            hdPatch = existing != null ? existing : new GameObject("MapGlobeHdPatch").transform;
+            hdPatch.SetParent(root, false);
+            if (hdPatch.GetComponent<MeshFilter>() == null)
+                hdPatch.gameObject.AddComponent<MeshFilter>();
+            if (hdPatch.GetComponent<MeshRenderer>() == null)
+                hdPatch.gameObject.AddComponent<MeshRenderer>();
+        }
+        if (hdGlobeMaterial == null)
+        {
+            var sh = Shader.Find("HK132/MapGlobe");
+            if (sh == null)
+                sh = Shader.Find("Unlit/Texture");
+            hdGlobeMaterial = new Material(sh != null ? sh : Shader.Find("Sprites/Default"));
+            hdGlobeMaterial.SetColor("_EdgeColor", GlobeGreen);
+            hdGlobeMaterial.SetFloat("_EdgeSoft", 0.02f);
+            hdGlobeMaterial.color = Color.white;
+        }
+        var hdR = hdPatch.GetComponent<MeshRenderer>();
+        hdR.sharedMaterial = hdGlobeMaterial;
+        hdR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        hdR.receiveShadows = false;
+        SetLayer(hdPatch.gameObject);
+        hdPatch.gameObject.SetActive(true);
+    }
+
+    private static Mesh GlobeSphereMesh()
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        var mesh = go.GetComponent<MeshFilter>().sharedMesh;
+        Object.Destroy(go);
+        return mesh;
+    }
+
+    private void RefreshGlobe()
+    {
+        EnsureGlobe();
+        var map = ResolveMap();
+        Vector2 lonRange = new Vector2(97.2f, 110.5f);
+        Vector2 latRange = new Vector2(26.2f, 34.9f);
+        if (map != null)
+            map.TryGetGeoRange(out lonRange, out latRange);
+        float lat0 = hasOrigin ? originLat : (latRange.x + latRange.y) * 0.5f;
+        float lng0 = hasOrigin ? originLng : (lonRange.x + lonRange.y) * 0.5f;
+        Vector3 sw = ToVisual(RadarDetectionSystem.GeoToLocalMeters(lonRange.x, latRange.x, 0f, lat0, lng0));
+        Vector3 se = ToVisual(RadarDetectionSystem.GeoToLocalMeters(lonRange.y, latRange.x, 0f, lat0, lng0));
+        Vector3 nw = ToVisual(RadarDetectionSystem.GeoToLocalMeters(lonRange.x, latRange.y, 0f, lat0, lng0));
+        Vector3 ne = ToVisual(RadarDetectionSystem.GeoToLocalMeters(lonRange.y, latRange.y, 0f, lat0, lng0));
+        Vector3 center = (sw + se + nw + ne) * 0.25f;
+        float width = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(se.x, 0f, se.z)));
+        float depth = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(nw.x, 0f, nw.z)));
+        float span = Mathf.Max(width, depth);
+        float radius = Mathf.Max(span * 28f, 20000f);
+
+        globe.position = new Vector3(center.x, -radius, center.z);
+        globe.localScale = Vector3.one * (radius * 2f);
+        globe.rotation = Quaternion.identity;
+
+        var filter = mapPatch.GetComponent<MeshFilter>();
+        filter.sharedMesh = BuildGlobePatchMesh(center, width, depth, radius, 0.02f);
+        mapPatch.position = Vector3.zero;
+        mapPatch.rotation = Quaternion.identity;
+        mapPatch.localScale = Vector3.one;
+
+        if (groundTexture == null)
+            groundTexture = LoadMapTexture(map);
+        if (mapGlobeMaterial != null)
+        {
+            if (groundTexture != null)
+            {
+                SharpenMapTexture(groundTexture);
+                mapGlobeMaterial.mainTexture = groundTexture;
+                mapGlobeMaterial.SetTexture("_MainTex", groundTexture);
+            }
+            mapGlobeMaterial.SetColor("_EdgeColor", GlobeGreen);
+            mapGlobeMaterial.SetFloat("_EdgeSoft", 0.055f);
+        }
+        var inset = FindAnyObjectByType<MapInsetOverlay>(FindObjectsInactive.Include);
+        if (inset != null)
+        {
+            hdTexture = inset.OverlayTexture ?? hdTexture;
+            Vector3 hdSw = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)inset.LonMin, (float)inset.LatMin, 0f, lat0, lng0));
+            Vector3 hdSe = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)inset.LonMax, (float)inset.LatMin, 0f, lat0, lng0));
+            Vector3 hdNw = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)inset.LonMin, (float)inset.LatMax, 0f, lat0, lng0));
+            Vector3 hdNe = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)inset.LonMax, (float)inset.LatMax, 0f, lat0, lng0));
+            Vector3 hdCenter = (hdSw + hdSe + hdNw + hdNe) * 0.25f;
+            float hdW = Mathf.Max(1f, Vector3.Distance(new Vector3(hdSw.x, 0f, hdSw.z), new Vector3(hdSe.x, 0f, hdSe.z)));
+            float hdD = Mathf.Max(1f, Vector3.Distance(new Vector3(hdSw.x, 0f, hdSw.z), new Vector3(hdNw.x, 0f, hdNw.z)));
+            var hdFilter = hdPatch.GetComponent<MeshFilter>();
+            hdFilter.sharedMesh = BuildGlobePatchMesh(hdCenter, hdW, hdD, radius, 0.12f);
+            hdPatch.position = Vector3.zero;
+            hdPatch.rotation = Quaternion.identity;
+            hdPatch.localScale = Vector3.one;
+            if (hdGlobeMaterial != null && hdTexture != null)
+            {
+                SharpenMapTexture(hdTexture);
+                hdGlobeMaterial.mainTexture = hdTexture;
+                hdGlobeMaterial.SetTexture("_MainTex", hdTexture);
+                hdGlobeMaterial.SetFloat("_EdgeSoft", 0.006f);
+            }
+            hdPatch.gameObject.SetActive(true);
+        }
+        else if (hdPatch != null)
+            hdPatch.gameObject.SetActive(false);
+
+        if (flightCamera != null)
+            flightCamera.farClipPlane = Mathf.Max(flightCamera.farClipPlane, radius * 20f, 4000000f);
+    }
+
+    private static Mesh BuildGlobePatchMesh(Vector3 center, float width, float depth, float radius, float lift)
+    {
+        const int n = 48;
+        var verts = new Vector3[n * n];
+        var uvs = new Vector2[n * n];
+        var norms = new Vector3[n * n];
+        Vector3 sphereC = new Vector3(center.x, -radius, center.z);
+        for (int iz = 0; iz < n; iz++)
+        {
+            float v = iz / (n - 1f);
+            float z = center.z + Mathf.Lerp(-depth * 0.5f, depth * 0.5f, v);
+            for (int ix = 0; ix < n; ix++)
+            {
+                float u = ix / (n - 1f);
+                float x = center.x + Mathf.Lerp(-width * 0.5f, width * 0.5f, u);
+                Vector3 fromC = new Vector3(x, 0f, z) - sphereC;
+                float mag = fromC.magnitude;
+                Vector3 on = mag > 1e-4f ? fromC * ((radius + lift) / mag) : Vector3.up * (radius + lift);
+                int i = iz * n + ix;
+                verts[i] = sphereC + on;
+                uvs[i] = new Vector2(u, v);
+                norms[i] = on.normalized;
+            }
+        }
+        var tris = new int[(n - 1) * (n - 1) * 6];
+        int t = 0;
+        for (int iz = 0; iz < n - 1; iz++)
+        {
+            for (int ix = 0; ix < n - 1; ix++)
+            {
+                int a = iz * n + ix;
+                int b = a + 1;
+                int c = a + n;
+                int d = c + 1;
+                tris[t++] = a; tris[t++] = c; tris[t++] = b;
+                tris[t++] = c; tris[t++] = d; tris[t++] = b;
+            }
+        }
+        var mesh = new Mesh { name = "MapGlobePatch" };
+        mesh.vertices = verts;
+        mesh.uv = uvs;
+        mesh.normals = norms;
+        mesh.triangles = tris;
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    private static Texture LoadMapTexture(PlaneDisplayController map)
+    {
+        if (map != null && map.MapSprite != null && map.MapSprite.texture != null)
+            return map.MapSprite.texture;
+        if (map != null && map.MapRoot != null)
+        {
+            var images = map.MapRoot.GetComponentsInChildren<Image>(true);
+            for (int i = 0; i < images.Length; i++)
+            {
+                if (images[i] != null && images[i].sprite != null && images[i].sprite.texture != null
+                    && images[i].gameObject.name != "飞行范围插图")
+                    return images[i].sprite.texture;
+            }
+        }
+        return Resources.Load<Texture2D>("成都");
+    }
+
+    private static void SharpenMapTexture(Texture tex)
+    {
+        if (tex == null)
+            return;
+        tex.filterMode = FilterMode.Bilinear;
+        tex.anisoLevel = 16;
+        tex.mipMapBias = 0f;
+        tex.wrapMode = TextureWrapMode.Clamp;
     }
 
     private PlaneDisplayController ResolveMap()
@@ -227,9 +527,46 @@ public class FlightSceneView : MonoBehaviour
         }
         RefreshDisplayScale();
 
-        var usedPlanes = new HashSet<string>();
+        var usedPlanes = TickAircraftPoses();
         Vector3 sum = Vector3.zero;
         int n = 0;
+        foreach (var kv in planeCenters)
+        {
+            if (!usedPlanes.Contains(kv.Key))
+                continue;
+            sum += kv.Value;
+            n++;
+        }
+        HideUnused(planes, usedPlanes);
+        HideUnused(followRigs, usedPlanes);
+        HideUnused(chaseCams, usedPlanes);
+        RefreshFollowDropdown(usedPlanes);
+        DrawDifferenceLabels(positions);
+        HideUnused(labels, usedPlanes);
+
+        RefreshGlobe();
+        DrawTracks(receiver);
+        DrawVolumes(radar, positions);
+        if (n > 0 && !followLocked)
+            FrameToMappedWindow(sum / n, MeanHeading(positions), FormationSpan(positions));
+    }
+
+    private HashSet<string> TickAircraftPoses()
+    {
+        var used = new HashSet<string>();
+        var receiver = FlightDataStreamReceiver.Instance;
+        if (receiver == null)
+            return used;
+        var positions = receiver.SnapshotPositions;
+        if (positions == null || positions.Count == 0)
+            return used;
+        if (!hasOrigin)
+        {
+            originLat = (float)positions[0].lat;
+            originLng = (float)positions[0].lng;
+            hasOrigin = true;
+            RefreshDisplayScale();
+        }
         for (int i = 0; i < positions.Count; i++)
         {
             var pos = positions[i];
@@ -237,26 +574,60 @@ public class FlightSceneView : MonoBehaviour
                 continue;
             float alt = StableAltitude(pos.trackId, pos.alt);
             Vector3 world = ToVisual(pos.lng, pos.lat, alt);
+            var rig = GetFollowRig(pos.trackId);
+            if (!rig.gameObject.activeSelf)
+                rig.gameObject.SetActive(true);
+            rig.SetPositionAndRotation(world, Quaternion.AngleAxis(pos.heading, Vector3.up));
             var plane = GetPlane(pos.trackId);
-            plane.rotation = FlightAttitude(pos.heading, pos.pitch, pos.roll);
-            plane.position = world;
+            if (!plane.gameObject.activeSelf)
+                plane.gameObject.SetActive(true);
+            plane.localRotation = Quaternion.Inverse(rig.rotation) * FlightAttitude(pos.heading, pos.pitch, pos.roll);
+            plane.localPosition = Vector3.zero;
             Vector3 center = RendererCenter(plane.gameObject);
-            plane.position += world - center;
+            plane.localPosition += rig.InverseTransformVector(world - center);
             LiftModelAboveGround(plane);
             planeCenters[pos.trackId] = world;
+            planeHeadings[pos.trackId] = pos.heading;
+            PlaceChaseOnRig(pos.trackId);
             AppendLiveTrail(pos.trackId, world);
-            usedPlanes.Add(pos.trackId);
-            sum += world;
-            n++;
+            used.Add(pos.trackId);
         }
-        HideUnused(planes, usedPlanes);
-        DrawDifferenceLabels(positions);
-        HideUnused(labels, usedPlanes);
+        return used;
+    }
 
-        DrawTracks(receiver);
-        DrawVolumes(radar, positions);
-        if (n > 0)
-            FrameToMappedWindow(sum / n, MeanHeading(positions), FormationSpan(positions));
+    private void StickRadarToAircraft()
+    {
+        for (int i = 0; i < outlineJobs.Count; i++)
+        {
+            var job = outlineJobs[i];
+            float alt = StableAltitude(job.sensor.trackId, job.sensor.alt);
+            Vector3 apex = AircraftApex(job.sensor, alt);
+            job.originMeters = FromVisual(apex);
+            outlineJobs[i] = job;
+            if (volumes.TryGetValue(job.key, out var filter) && filter != null
+                && volumeApexBuilt.TryGetValue(job.key, out var built))
+            {
+                filter.transform.position = apex - built;
+            }
+        }
+
+        var radar = FindAnyObjectByType<RadarDetectionSystem>();
+        if (radar == null)
+            return;
+        var detections = radar.CurrentDetections;
+        for (int d = 0; d < detections.Count; d++)
+        {
+            var det = detections[d];
+            string hitKey = RadarDetectionSystem.MakeSensorKey(det.sourceTrackId, det.detectorType) + "->" + det.targetTrackId;
+            if (!hits.TryGetValue(hitKey, out var beam) || beam == null)
+                continue;
+            Vector3 from = planeCenters.TryGetValue(det.sourceTrackId, out var src) ? src : beam.GetPosition(0);
+            Vector3 to = planeCenters.TryGetValue(det.targetTrackId, out var dst)
+                ? dst
+                : ToVisual(RadarDetectionSystem.GeoToLocalMeters(det.targetLng, det.targetLat, det.targetAlt, originLat, originLng));
+            beam.SetPosition(0, from);
+            beam.SetPosition(1, to);
+        }
     }
 
     private void RefreshDisplayScale()
@@ -266,15 +637,27 @@ public class FlightSceneView : MonoBehaviour
         {
             uniform = Mathf.Max(1e-6f, uniform);
             unitsPerMeter = new Vector3(uniform, uniform, uniform);
+            ApplyModelScale();
+            ApplyClipPlanes(flightCamera);
         }
     }
 
+    private void ApplyClipPlanes(Camera cam)
+    {
+        if (cam == null)
+            return;
+        // 近裁剪过小会毁掉远处深度，地平线会被远裁剪平面切成一条硬边。
+        float near = Mathf.Clamp(Mathf.Max(0.004f, ModelLength * 0.1f), 0.004f, 1.5f);
+        cam.nearClipPlane = near;
+        cam.farClipPlane = Mathf.Max(cam.farClipPlane, 4000000f);
+    }
+
     /// <summary>只抬机模，不改雷达/轨迹高度，避免锥体跟着形变。</summary>
-    private static void LiftModelAboveGround(Transform plane)
+    private void LiftModelAboveGround(Transform plane)
     {
         if (plane == null)
             return;
-        const float clearance = 0.08f;
+        float clearance = 0.5f * Mathf.Max(1e-8f, unitsPerMeter.y);
         var renderers = plane.GetComponentsInChildren<Renderer>();
         if (renderers == null || renderers.Length == 0)
         {
@@ -312,17 +695,17 @@ public class FlightSceneView : MonoBehaviour
         Vector3 body = planeCenters.TryGetValue(sensor.trackId, out var center)
             ? center
             : ToVisual(sensor.lng, sensor.lat, alt);
-        // 网格机头在局部 +Y，但姿态四元数之后世界朝向是 -Y，沿 +Y 会把雷达推到机尾。
         Vector3 nose = -(FlightAttitude(sensor.heading, sensor.pitch, sensor.roll) * Vector3.up);
         if (nose.sqrMagnitude < 1e-4f)
             return body;
-        float along = RadarStationTuner.Instance != null
+        float alongMeters = RadarStationTuner.Instance != null
             ? RadarStationTuner.Instance.Offset3D(sensor.mountSign)
             : sensor.mountSign * 8f;
-        float up = RadarStationTuner.Instance != null
+        float upMeters = RadarStationTuner.Instance != null
             ? RadarStationTuner.Instance.OffsetUp(sensor.mountSign)
             : 0f;
-        return body + nose.normalized * along + Vector3.up * up;
+        float scale = Mathf.Max(unitsPerMeter.x, unitsPerMeter.z);
+        return body + nose.normalized * (alongMeters * scale) + Vector3.up * (upMeters * unitsPerMeter.y);
     }
 
     private void FrameToMappedWindow(Vector3 aircraftFocus, float heading, float aircraftSpan)
@@ -458,21 +841,24 @@ public class FlightSceneView : MonoBehaviour
             return existing;
         var go = Instantiate(GetTemplate());
         go.name = "FlightPlane_" + trackId;
-        go.transform.SetParent(root, false);
+        go.transform.SetParent(GetFollowRig(trackId), false);
         foreach (var behaviour in go.GetComponentsInChildren<MonoBehaviour>(true))
         {
             if (behaviour != null)
                 behaviour.enabled = false;
         }
+        MakePlaneVisible(go);
         foreach (var collider in go.GetComponentsInChildren<Collider>(true))
         {
             if (collider != null)
                 Destroy(collider);
         }
+        ApplyModelScale();
         NormalizeLength(go, ModelLength);
         appliedModelLength = ModelLength;
         SetLayer(go);
         planes[trackId] = go.transform;
+        GetChaseCamera(trackId);
         return go.transform;
     }
 
@@ -508,30 +894,15 @@ public class FlightSceneView : MonoBehaviour
             ? Mathf.FloorToInt(Time.unscaledTime / cycle)
             : 0;
         Color color = tuner != null ? tuner.textColor : new Color(0.92f, 0.96f, 1f, 1f);
-        Vector3 camRight = flightCamera != null ? flightCamera.transform.right : Vector3.right;
-        Vector3 camForward = flightCamera != null ? flightCamera.transform.forward : Vector3.forward;
-        camRight.y = 0f;
-        if (camRight.sqrMagnitude > 0.0001f)
-            camRight.Normalize();
-        camForward.y = 0f;
-        if (camForward.sqrMagnitude > 0.0001f)
-            camForward.Normalize();
-        float right = tuner != null ? tuner.offsetRight : 0f;
-        float up = tuner != null ? tuner.offsetUp : 12f;
-        float forward = tuner != null ? tuner.offsetForward : 0f;
 
         for (int i = 0; i < live.Count; i++)
         {
             var pos = live[i];
-            Vector3 world = planeCenters[pos.trackId];
             var mesh = GetLabel(pos.trackId);
             mesh.gameObject.SetActive(true);
             mesh.color = color;
             mesh.text = BuildCycledDifferenceLabel(pos, live, peerSlot);
-            float scale = tuner != null ? Mathf.Max(0.05f, tuner.textScale) : 1f;
-            mesh.transform.localScale = new Vector3(scale, scale, scale);
-            mesh.transform.position = world + camRight * right + Vector3.up * up + camForward * forward;
-            FaceLabel(mesh);
+            PlaceDifferenceLabel(pos.trackId, mesh);
         }
     }
 
@@ -540,7 +911,29 @@ public class FlightSceneView : MonoBehaviour
         if (!labelsVisible || flightCamera == null)
             return;
         foreach (var kv in labels)
-            FaceLabel(kv.Value);
+            PlaceDifferenceLabel(kv.Key, kv.Value);
+    }
+
+    private void PlaceDifferenceLabel(string trackId, TextMesh mesh)
+    {
+        if (mesh == null || flightCamera == null || !mesh.gameObject.activeInHierarchy)
+            return;
+        var tuner = DifferenceLabelTuner.Instance;
+        float right = tuner != null ? tuner.offsetRight : 0f;
+        float up = tuner != null ? tuner.offsetUp : 12f;
+        float forward = tuner != null ? tuner.offsetForward : 0f;
+        Vector3 camRight = flightCamera.transform.right;
+        Vector3 camForward = flightCamera.transform.forward;
+        camRight.y = 0f;
+        if (camRight.sqrMagnitude > 0.0001f)
+            camRight.Normalize();
+        camForward.y = 0f;
+        if (camForward.sqrMagnitude > 0.0001f)
+            camForward.Normalize();
+        Vector3 world = TrailTip(trackId);
+        float px = PixelWidth(world, 1f);
+        mesh.transform.position = world + camRight * (right * px) + Vector3.up * (up * px) + camForward * (forward * px);
+        FaceLabel(mesh);
     }
 
     private void FaceLabel(TextMesh mesh)
@@ -550,6 +943,11 @@ public class FlightSceneView : MonoBehaviour
         Vector3 toCam = mesh.transform.position - flightCamera.transform.position;
         if (toCam.sqrMagnitude > 0.0001f)
             mesh.transform.rotation = Quaternion.LookRotation(toCam, Vector3.up);
+        var tuner = DifferenceLabelTuner.Instance;
+        float mul = tuner != null ? Mathf.Max(0.02f, tuner.textScale) : 1f;
+        float world = PixelWidth(mesh.transform.position, 26f * mul);
+        float s = world / 0.22f;
+        mesh.transform.localScale = new Vector3(s, s, s);
     }
 
     private static string BuildCycledDifferenceLabel(
@@ -675,6 +1073,102 @@ public class FlightSceneView : MonoBehaviour
         return modelTemplate;
     }
 
+    private Light flightSun;
+
+    private void EnsureFlightLight()
+    {
+        EnsureRoot();
+        if (flightSun != null)
+            return;
+        var existing = root != null ? root.Find("FlightSun") : null;
+        if (existing != null)
+            flightSun = existing.GetComponent<Light>();
+        if (flightSun == null)
+        {
+            var go = new GameObject("FlightSun");
+            if (root != null)
+                go.transform.SetParent(root, false);
+            flightSun = go.AddComponent<Light>();
+        }
+        flightSun.type = LightType.Directional;
+        flightSun.color = new Color(1f, 0.96f, 0.88f);
+        flightSun.intensity = 1.35f;
+        flightSun.shadows = LightShadows.None;
+        flightSun.cullingMask = 1 << FlightLayer;
+        flightSun.transform.rotation = Quaternion.Euler(38f, -42f, 0f);
+        SetLayer(flightSun.gameObject);
+    }
+
+    private static Shader planeUnlitShader;
+
+    private static Shader PlaneUnlitShader()
+    {
+        if (planeUnlitShader != null)
+            return planeUnlitShader;
+        planeUnlitShader = Shader.Find("HK132/PlaneUnlit");
+        if (planeUnlitShader == null)
+            planeUnlitShader = Shader.Find("Unlit/Texture");
+        if (planeUnlitShader == null)
+            planeUnlitShader = Shader.Find("Sprites/Default");
+        return planeUnlitShader;
+    }
+
+    private static void MakePlaneVisible(GameObject go)
+    {
+        if (go == null)
+            return;
+        var shader = PlaneUnlitShader();
+        var renderers = go.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (renderer == null)
+                continue;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            var mats = renderer.materials;
+            if (mats == null)
+                continue;
+            for (int m = 0; m < mats.Length; m++)
+            {
+                var src = mats[m];
+                if (src == null)
+                    continue;
+                Texture tex = src.mainTexture;
+                if (tex == null && src.HasProperty("_MainTex"))
+                    tex = src.GetTexture("_MainTex");
+                if (tex == null && src.HasProperty("_BaseMap"))
+                    tex = src.GetTexture("_BaseMap");
+                Color col = Color.white;
+                if (src.HasProperty("_Color"))
+                    col = src.GetColor("_Color");
+                else if (src.HasProperty("_BaseColor"))
+                    col = src.GetColor("_BaseColor");
+                if (col.maxColorComponent < 0.08f)
+                    col = new Color(0.72f, 0.75f, 0.78f, 1f);
+                if (shader != null)
+                {
+                    var next = new Material(shader);
+                    if (tex != null)
+                        next.mainTexture = tex;
+                    next.color = tex != null ? Color.white : col;
+                    next.SetColor("_Color", tex != null ? Color.white : col);
+                    mats[m] = next;
+                }
+                else
+                {
+                    if (src.HasProperty("_Metallic"))
+                        src.SetFloat("_Metallic", 0f);
+                    if (src.HasProperty("_Glossiness"))
+                        src.SetFloat("_Glossiness", 0.25f);
+                    if (src.HasProperty("_Color"))
+                        src.SetColor("_Color", col);
+                }
+            }
+            renderer.materials = mats;
+        }
+    }
+
     private static Color TrailColor(string trackId)
     {
         var map = FindAnyObjectByType<PlaneDisplayController>();
@@ -713,7 +1207,7 @@ public class FlightSceneView : MonoBehaviour
                 if (line == null || line.positions == null || line.positions.Count < 2)
                     continue;
                 string key = string.IsNullOrWhiteSpace(line.trackId) ? "track_" + i : line.trackId;
-                float planWidth = Mathf.Max(0.002f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
+                float planWidth = Mathf.Max(1e-6f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
                 var lr = GetLine(tracks, key, planWidth, TrailColor(line.trackId));
                 lr.widthMultiplier = planWidth;
                 int count = 0;
@@ -738,21 +1232,74 @@ public class FlightSceneView : MonoBehaviour
                 used.Add(key);
             }
         }
-        float liveWidth = Mathf.Max(0.002f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
+        float liveWidth = Mathf.Max(1e-6f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
         foreach (var kv in liveTrails)
         {
-            if (kv.Value.Count < 2)
+            if (kv.Value.Count < 1)
                 continue;
             var lr = GetLine(tracks, "live_" + kv.Key, liveWidth, TrailColor(kv.Key));
             lr.widthMultiplier = liveWidth;
-            // 全程航迹点数很多，一次 SetPositions 比逐点 SetPosition 快得多。
-            lr.positionCount = kv.Value.Count;
-            lr.SetPositions(kv.Value.ToArray());
+            ApplyLiveTrailPositions(lr, kv.Key, kv.Value);
             ApplyTrailColor(lr, TrailColor(kv.Key));
             lr.gameObject.SetActive(TrailVisible(kv.Key));
             used.Add("live_" + kv.Key);
         }
         HideUnused(tracks, used);
+    }
+
+    private Vector3 TrailTip(string trackId)
+    {
+        if (planes.TryGetValue(trackId, out var plane) && plane != null)
+            return RendererCenter(plane.gameObject);
+        if (planeCenters.TryGetValue(trackId, out var center))
+            return center;
+        return Vector3.zero;
+    }
+
+    private void ApplyLiveTrailPositions(LineRenderer lr, string trackId, List<Vector3> samples)
+    {
+        if (lr == null || samples == null || samples.Count < 1)
+            return;
+        Vector3 tip = TrailTip(trackId);
+        int n = samples.Count;
+        bool extra = (samples[n - 1] - tip).sqrMagnitude > 1e-10f;
+        int count = extra ? n + 1 : n;
+        if (lr.positionCount != count)
+        {
+            var arr = new Vector3[count];
+            samples.CopyTo(arr);
+            arr[count - 1] = tip;
+            lr.positionCount = count;
+            lr.SetPositions(arr);
+        }
+        else
+            lr.SetPosition(count - 1, tip);
+    }
+
+    private void PinTrailsToAircraft()
+    {
+        float liveWidth = Mathf.Max(1e-6f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
+        foreach (var kv in liveTrails)
+        {
+            if (kv.Value == null || kv.Value.Count < 1 || !TrailVisible(kv.Key))
+                continue;
+            var lr = GetLine(tracks, "live_" + kv.Key, liveWidth, TrailColor(kv.Key));
+            lr.widthMultiplier = liveWidth;
+            ApplyLiveTrailPositions(lr, kv.Key, kv.Value);
+            if (!lr.gameObject.activeSelf)
+            {
+                ApplyTrailColor(lr, TrailColor(kv.Key));
+                lr.gameObject.SetActive(true);
+            }
+        }
+        foreach (var kv in tracks)
+        {
+            if (kv.Value == null || kv.Key.StartsWith("live_"))
+                continue;
+            if (kv.Value.positionCount < 1 || !planes.ContainsKey(kv.Key))
+                continue;
+            kv.Value.SetPosition(kv.Value.positionCount - 1, TrailTip(kv.Key));
+        }
     }
 
     private void DrawVolumes(RadarDetectionSystem radar, List<FlightDataStreamReceiver.TrackPosition> positions)
@@ -791,19 +1338,27 @@ public class FlightSceneView : MonoBehaviour
                     continue;
                 anyHit = true;
                 string hitKey = key + "->" + det.targetTrackId;
-                float hitWidth = Mathf.Max(0.002f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
+                float hitWidth = Mathf.Max(1e-6f, TrailWidthMeters * Mathf.Max(unitsPerMeter.x, unitsPerMeter.z));
                 var beam = GetLine(hits, hitKey, hitWidth, Color.white);
                 beam.widthMultiplier = hitWidth;
                 beam.positionCount = 2;
-                beam.SetPosition(0, apex);
-                Vector3 targetMeters = RadarDetectionSystem.GeoToLocalMeters(det.targetLng, det.targetLat, det.targetAlt, originLat, originLng);
-                beam.SetPosition(1, ToVisual(targetMeters));
+                Vector3 from = planeCenters.TryGetValue(sensor.trackId, out var srcCenter)
+                    ? srcCenter
+                    : apex;
+                Vector3 to = planeCenters.TryGetValue(det.targetTrackId, out var dstCenter)
+                    ? dstCenter
+                    : ToVisual(RadarDetectionSystem.GeoToLocalMeters(det.targetLng, det.targetLat, det.targetAlt, originLat, originLng));
+                beam.SetPosition(0, from);
+                beam.SetPosition(1, to);
                 beam.startColor = beam.endColor = color;
                 beam.gameObject.SetActive(true);
                 usedHits.Add(hitKey);
             }
             var filter = GetVolume(key);
+            filter.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             BuildVolume(filter.mesh, sensor, originMeters);
+            volumeApexBuilt[key] = apex;
+            volumeTrackId[key] = sensor.trackId;
             var renderer = filter.GetComponent<MeshRenderer>();
             ApplyRadarVolumeMaterial(renderer, color, anyHit);
             filter.gameObject.SetActive(true);
@@ -1169,8 +1724,7 @@ public class FlightSceneView : MonoBehaviour
         var lr = GetLine(volumeEdges, lineKey, 1f, edge);
         lr.positionCount = points.Length;
         lr.SetPositions(points);
-        Vector3 mid = points[points.Length / 2];
-        lr.widthMultiplier = PixelWidth(mid, RadarEdgePixels);
+        ApplyScreenLineWidth(lr, points);
         lr.startColor = lr.endColor = edge;
         lr.numCapVertices = 2;
         lr.numCornerVertices = 3;
@@ -1186,7 +1740,7 @@ public class FlightSceneView : MonoBehaviour
         var lr = GetLine(volumeEdges, lineKey, 1f, edge);
         lr.positionCount = points.Count;
         lr.SetPositions(points.ToArray());
-        lr.widthMultiplier = PixelWidth(points[0], RadarEdgePixels);
+        ApplyScreenLineWidth(lr, points);
         lr.startColor = lr.endColor = edge;
         lr.numCapVertices = 2;
         lr.gameObject.SetActive(true);
@@ -1198,8 +1752,38 @@ public class FlightSceneView : MonoBehaviour
         if (flightCamera == null)
             return 0.02f;
         float dist = Vector3.Distance(flightCamera.transform.position, worldPoint);
+        return PixelWidthAtDistance(dist, pixels);
+    }
+
+    private float PixelWidthAtDistance(float dist, float pixels)
+    {
+        if (flightCamera == null)
+            return 0.02f;
+        dist = Mathf.Max(0.02f, dist);
         float height = Mathf.Max(1f, flightCamera.pixelHeight);
-        return pixels * 2f * dist * Mathf.Tan(flightCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) / height;
+        return Mathf.Max(1e-6f, pixels * 2f * dist * Mathf.Tan(flightCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) / height);
+    }
+
+    /// <summary>描边按屏幕像素宽，随相机距离变，不用固定米制粗细。</summary>
+    private void ApplyScreenLineWidth(LineRenderer lr, IList<Vector3> points)
+    {
+        if (lr == null)
+            return;
+        float dist = 8f;
+        if (flightCamera != null && points != null && points.Count > 0)
+        {
+            dist = float.MaxValue;
+            Vector3 cam = flightCamera.transform.position;
+            for (int i = 0; i < points.Count; i++)
+                dist = Mathf.Min(dist, Vector3.Distance(cam, points[i]));
+            if (dist > 1e8f)
+                dist = 8f;
+        }
+        lr.widthMultiplier = 1f;
+        float w = PixelWidthAtDistance(dist, RadarEdgePixels);
+        lr.startWidth = w;
+        lr.endWidth = w;
+        lr.alignment = LineAlignment.View;
     }
 
     private List<Vector3> SphereSilhouette(Vector3 originMeters, Vector3 axis, Vector3 side, Vector3 up, float range, float yawHalfRad, float pitchHalfRad)
@@ -1278,7 +1862,7 @@ public class FlightSceneView : MonoBehaviour
         return arc;
     }
 
-    private static void ApplyRadarVolumeMaterial(MeshRenderer renderer, Color color, bool anyHit)
+    private void ApplyRadarVolumeMaterial(MeshRenderer renderer, Color color, bool anyHit)
     {
         if (renderer == null)
             return;
@@ -1289,11 +1873,12 @@ public class FlightSceneView : MonoBehaviour
             mat = new Material(shader != null ? shader : Shader.Find("Sprites/Default"));
             renderer.sharedMaterial = mat;
         }
-        float alpha = anyHit ? 0.22f : 0.16f;
+        float alpha = Mathf.Clamp(RadarFillAlpha, 0.01f, 0.9f);
+        if (anyHit)
+            alpha = Mathf.Min(0.9f, alpha * 1.25f);
         Color fill = new Color(color.r, color.g, color.b, alpha);
-        Color edge = new Color(color.r, color.g, color.b, alpha);
         mat.SetColor("_Color", fill);
-        mat.SetColor("_EdgeColor", edge);
+        mat.SetColor("_EdgeColor", fill);
         mat.SetFloat("_EdgeStart", 0f);
         mat.SetFloat("_EdgeEnd", 0f);
         mat.color = fill;
@@ -1377,17 +1962,18 @@ public class FlightSceneView : MonoBehaviour
         string leftKey = key + "|edgeL";
         string rightKey = key + "|edgeR";
         string capKey = key + "|cap";
-        DrawGradientLine(leftKey, apex, left, color, far, 2f);
-        DrawGradientLine(rightKey, apex, right, color, far, 2f);
+        DrawGradientLine(leftKey, apex, left, color, far);
+        DrawGradientLine(rightKey, apex, right, color, far);
         used.Add(leftKey);
         used.Add(rightKey);
 
         var cap = BuildCapSilhouette(apex, axis, range, half, cam, left, right);
         if (cap.Count >= 2)
         {
-            var lr = GetLine(volumeEdges, capKey, 1.8f, far);
+            var lr = GetLine(volumeEdges, capKey, 1f, far);
             lr.positionCount = cap.Count;
             lr.SetPositions(cap.ToArray());
+            ApplyScreenLineWidth(lr, cap);
             lr.startColor = lr.endColor = far;
             lr.colorGradient = FlatGradient(far);
             lr.gameObject.SetActive(true);
@@ -1395,12 +1981,13 @@ public class FlightSceneView : MonoBehaviour
         }
     }
 
-    private void DrawGradientLine(string key, Vector3 from, Vector3 to, Color near, Color far, float width)
+    private void DrawGradientLine(string key, Vector3 from, Vector3 to, Color near, Color far)
     {
-        var lr = GetLine(volumeEdges, key, width, near);
+        var lr = GetLine(volumeEdges, key, 1f, near);
         lr.positionCount = 2;
         lr.SetPosition(0, from);
         lr.SetPosition(1, to);
+        ApplyScreenLineWidth(lr, new[] { from, to });
         lr.colorGradient = new Gradient
         {
             colorKeys = new[]
@@ -1516,15 +2103,452 @@ public class FlightSceneView : MonoBehaviour
     private float lastHeading;
     private float lastSpan = 80f;
 
+    private Camera GetChaseCamera(string trackId)
+    {
+        if (chaseCams.TryGetValue(trackId, out var existing) && existing != null)
+            return existing;
+        EnsureRoot();
+        var go = new GameObject("ChaseCam_" + trackId);
+        go.transform.SetParent(GetFollowRig(trackId), false);
+        var cam = go.AddComponent<Camera>();
+        cam.enabled = false;
+        cam.cullingMask = 1 << FlightLayer;
+        cam.clearFlags = CameraClearFlags.Skybox;
+        cam.fieldOfView = flightCamera != null ? flightCamera.fieldOfView : 50f;
+        ApplyClipPlanes(cam);
+        if (skyMaterial != null)
+        {
+            var sky = go.AddComponent<Skybox>();
+            sky.material = skyMaterial;
+        }
+        SetLayer(go);
+        chaseCams[trackId] = cam;
+        return cam;
+    }
+
+    private Transform GetFollowRig(string trackId)
+    {
+        if (followRigs.TryGetValue(trackId, out var existing) && existing != null)
+            return existing;
+        EnsureRoot();
+        var go = new GameObject("FollowRig_" + trackId);
+        go.transform.SetParent(root, false);
+        SetLayer(go);
+        followRigs[trackId] = go.transform;
+        return go.transform;
+    }
+
+    private void PlaceChaseOnRig(string trackId)
+    {
+        var cam = GetChaseCamera(trackId);
+        if (cam == null)
+            return;
+        if (!cam.gameObject.activeSelf)
+            cam.gameObject.SetActive(true);
+        var rig = GetFollowRig(trackId);
+        if (cam.transform.parent != rig)
+            cam.transform.SetParent(rig, false);
+        var tune = ChaseCamTuner.Instance;
+        float backM = tune != null ? tune.back : 80f;
+        float heightM = tune != null ? tune.height : 22f;
+        float sideM = tune != null ? tune.side : 0f;
+        float lookPitch = tune != null ? tune.lookPitch : 8f;
+        float lookYaw = tune != null ? tune.lookYaw : 0f;
+        float scale = Mathf.Max(1e-8f, unitsPerMeter.x, unitsPerMeter.z);
+        cam.transform.localPosition = new Vector3(sideM * scale, heightM * unitsPerMeter.y, -backM * scale);
+        cam.transform.localRotation = Quaternion.Euler(-lookPitch, lookYaw, 0f);
+        cam.fieldOfView = Mathf.Clamp(tune != null ? tune.fov : 55f, 20f, 90f);
+        ApplyClipPlanes(cam);
+    }
+
+    private void HandleFollowHotkey()
+    {
+        if (IsTyping())
+            return;
+        if (!Input.GetKeyDown(KeyCode.B))
+            return;
+        if (followLocked)
+            UnlockFollow();
+        else
+            LockFollow();
+    }
+
+    private void LockFollow()
+    {
+        if (string.IsNullOrWhiteSpace(followTrackId))
+        {
+            foreach (var kv in planes)
+            {
+                if (kv.Value != null && kv.Value.gameObject.activeInHierarchy)
+                {
+                    followTrackId = kv.Key;
+                    break;
+                }
+            }
+        }
+        if (string.IsNullOrWhiteSpace(followTrackId) || !planeCenters.ContainsKey(followTrackId))
+            return;
+        if (flightCamera != null)
+        {
+            unlockedPos = flightCamera.transform.position;
+            unlockedYaw = yaw;
+            unlockedPitch = pitch;
+            unlockedOrbitDistance = orbitDistance;
+            unlockedPivot = orbitPivot;
+        }
+        followLocked = true;
+        followSnap = true;
+        followSmoothVel = Vector3.zero;
+        userHasControl = true;
+        flying = false;
+        panning = false;
+        orbiting = false;
+        zoomDragging = false;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        RefreshFollowHint();
+    }
+
+    private void UnlockFollow()
+    {
+        followLocked = false;
+        if (flightCamera != null)
+        {
+            SyncAnglesFromCamera();
+            orbitPivot = planeCenters.TryGetValue(followTrackId ?? "", out var pivot)
+                ? pivot
+                : flightCamera.transform.position + flightCamera.transform.forward * Mathf.Max(10f, orbitDistance);
+            orbitDistance = Mathf.Max(5f, Vector3.Distance(flightCamera.transform.position, orbitPivot));
+        }
+        userHasControl = true;
+        flying = false;
+        panning = false;
+        orbiting = false;
+        zoomDragging = false;
+        RefreshFollowHint();
+    }
+
+    private void ApplyFollowCamera()
+    {
+        if (!followLocked || flightCamera == null)
+            return;
+        if (string.IsNullOrWhiteSpace(followTrackId))
+        {
+            UnlockFollow();
+            return;
+        }
+        if (!TryFollowTarget(followTrackId, out Vector3 center, out float heading, out _))
+        {
+            UnlockFollow();
+            return;
+        }
+        var rig = GetFollowRig(followTrackId);
+        rig.SetPositionAndRotation(center, Quaternion.AngleAxis(heading, Vector3.up));
+        PlaceChaseOnRig(followTrackId);
+        var chase = GetChaseCamera(followTrackId);
+        if (chase == null)
+        {
+            UnlockFollow();
+            return;
+        }
+        flightCamera.transform.SetPositionAndRotation(chase.transform.position, chase.transform.rotation);
+        flightCamera.fieldOfView = chase.fieldOfView;
+        ApplyClipPlanes(flightCamera);
+        SyncAnglesFromCamera();
+        orbitPivot = center;
+        orbitDistance = Mathf.Max(5f, Vector3.Distance(flightCamera.transform.position, center));
+    }
+
+    private bool TryFollowTarget(string trackId, out Vector3 center, out float heading, out float bodyPitch)
+    {
+        center = Vector3.zero;
+        heading = 0f;
+        bodyPitch = 0f;
+        var receiver = FlightDataStreamReceiver.Instance;
+        var positions = receiver != null ? receiver.SnapshotPositions : null;
+        if (positions != null)
+        {
+            for (int i = 0; i < positions.Count; i++)
+            {
+                var pos = positions[i];
+                if (pos == null || pos.trackId != trackId)
+                    continue;
+                float alt = StableAltitude(trackId, pos.alt);
+                center = ToVisual(pos.lng, pos.lat, alt);
+                heading = pos.heading;
+                bodyPitch = pos.pitch;
+                planeCenters[trackId] = center;
+                planeHeadings[trackId] = heading;
+                return true;
+            }
+        }
+        if (planeCenters.TryGetValue(trackId, out center))
+        {
+            planeHeadings.TryGetValue(trackId, out heading);
+            return true;
+        }
+        return false;
+    }
+
+    private void EnsureFollowDropdown()
+    {
+        if (followDropdown != null || viewImage == null)
+            return;
+        var parent = viewImage.rectTransform;
+        var go = new GameObject("PlaneFollowDropdown", typeof(RectTransform), typeof(Image), typeof(Dropdown));
+        go.transform.SetParent(parent, false);
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1f, 1f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(1f, 1f);
+        rt.sizeDelta = new Vector2(176f, 28f);
+        rt.anchoredPosition = new Vector2(-10f, -10f);
+        var image = go.GetComponent<Image>();
+        image.color = new Color(0.08f, 0.12f, 0.18f, 0.92f);
+        var dropdown = go.GetComponent<Dropdown>();
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+
+        var label = CreateUiText(go.transform, "Label", font, 14, TextAnchor.MiddleLeft);
+        label.rectTransform.offsetMin = new Vector2(8f, 0f);
+        label.rectTransform.offsetMax = new Vector2(-22f, 0f);
+        label.text = "选择飞机";
+
+        var arrow = CreateUiText(go.transform, "Arrow", font, 14, TextAnchor.MiddleCenter);
+        arrow.rectTransform.anchorMin = new Vector2(1f, 0f);
+        arrow.rectTransform.anchorMax = new Vector2(1f, 1f);
+        arrow.rectTransform.pivot = new Vector2(1f, 0.5f);
+        arrow.rectTransform.anchoredPosition = Vector2.zero;
+        arrow.rectTransform.sizeDelta = new Vector2(22f, 0f);
+        arrow.rectTransform.offsetMin = new Vector2(-22f, 0f);
+        arrow.rectTransform.offsetMax = Vector2.zero;
+        arrow.text = "v";
+
+        var template = CreateFollowDropdownTemplate(go.transform, font);
+        dropdown.targetGraphic = image;
+        dropdown.captionText = label;
+        dropdown.template = template;
+        dropdown.itemText = template.Find("Viewport/Content/Item/Item Label")?.GetComponent<Text>();
+        dropdown.onValueChanged.AddListener(OnFollowDropdownChanged);
+        followDropdown = dropdown;
+
+        var hintGo = new GameObject("FollowHint", typeof(RectTransform), typeof(Text));
+        hintGo.transform.SetParent(parent, false);
+        var hintRt = hintGo.GetComponent<RectTransform>();
+        hintRt.anchorMin = new Vector2(1f, 1f);
+        hintRt.anchorMax = new Vector2(1f, 1f);
+        hintRt.pivot = new Vector2(1f, 1f);
+        hintRt.sizeDelta = new Vector2(176f, 18f);
+        hintRt.anchoredPosition = new Vector2(-10f, -40f);
+        followHint = hintGo.GetComponent<Text>();
+        followHint.font = font;
+        followHint.fontSize = 12;
+        followHint.alignment = TextAnchor.MiddleRight;
+        followHint.color = new Color(0.85f, 0.9f, 0.95f, 0.85f);
+        followHint.raycastTarget = false;
+        followHint.text = "B 锁定飞机视角";
+    }
+
+    private static Text CreateUiText(Transform parent, string name, Font font, int size, TextAnchor align)
+    {
+        var go = new GameObject(name, typeof(RectTransform), typeof(Text));
+        go.transform.SetParent(parent, false);
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+        var text = go.GetComponent<Text>();
+        text.font = font;
+        text.fontSize = size;
+        text.alignment = align;
+        text.color = Color.white;
+        text.raycastTarget = false;
+        return text;
+    }
+
+    private static RectTransform CreateFollowDropdownTemplate(Transform dropdown, Font font)
+    {
+        var templateGo = new GameObject("Template", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+        templateGo.transform.SetParent(dropdown, false);
+        var template = templateGo.GetComponent<RectTransform>();
+        template.anchorMin = new Vector2(0f, 0f);
+        template.anchorMax = new Vector2(1f, 0f);
+        template.pivot = new Vector2(0.5f, 1f);
+        template.sizeDelta = new Vector2(0f, 140f);
+        template.anchoredPosition = Vector2.zero;
+        templateGo.GetComponent<Image>().color = new Color(0.07f, 0.1f, 0.14f, 0.96f);
+        templateGo.SetActive(false);
+        var canvas = templateGo.AddComponent<Canvas>();
+        canvas.overrideSorting = true;
+        canvas.sortingOrder = 80;
+        templateGo.AddComponent<GraphicRaycaster>();
+
+        var viewportGo = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(Mask));
+        viewportGo.transform.SetParent(template, false);
+        var viewport = viewportGo.GetComponent<RectTransform>();
+        viewport.anchorMin = Vector2.zero;
+        viewport.anchorMax = Vector2.one;
+        viewport.offsetMin = Vector2.zero;
+        viewport.offsetMax = Vector2.zero;
+        viewportGo.GetComponent<Image>().color = Color.white;
+        viewportGo.GetComponent<Mask>().showMaskGraphic = false;
+
+        var contentGo = new GameObject("Content", typeof(RectTransform));
+        contentGo.transform.SetParent(viewport, false);
+        var content = contentGo.GetComponent<RectTransform>();
+        content.anchorMin = new Vector2(0f, 1f);
+        content.anchorMax = new Vector2(1f, 1f);
+        content.pivot = new Vector2(0.5f, 1f);
+        content.sizeDelta = new Vector2(0f, 28f);
+
+        var itemGo = new GameObject("Item", typeof(RectTransform), typeof(Toggle));
+        itemGo.transform.SetParent(content, false);
+        var item = itemGo.GetComponent<RectTransform>();
+        item.anchorMin = new Vector2(0f, 0.5f);
+        item.anchorMax = new Vector2(1f, 0.5f);
+        item.sizeDelta = new Vector2(0f, 26f);
+        var toggle = itemGo.GetComponent<Toggle>();
+
+        var bgGo = new GameObject("Item Background", typeof(RectTransform), typeof(Image));
+        bgGo.transform.SetParent(item, false);
+        var bg = bgGo.GetComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+        bgGo.GetComponent<Image>().color = new Color(0.12f, 0.16f, 0.22f, 1f);
+
+        var checkGo = new GameObject("Item Checkmark", typeof(RectTransform), typeof(Image));
+        checkGo.transform.SetParent(item, false);
+        var check = checkGo.GetComponent<RectTransform>();
+        check.anchorMin = new Vector2(0f, 0.5f);
+        check.anchorMax = new Vector2(0f, 0.5f);
+        check.sizeDelta = new Vector2(8f, 8f);
+        check.anchoredPosition = new Vector2(10f, 0f);
+        checkGo.GetComponent<Image>().color = new Color(0.35f, 0.75f, 1f, 1f);
+
+        var itemLabel = CreateUiText(item, "Item Label", font, 14, TextAnchor.MiddleLeft);
+        itemLabel.rectTransform.offsetMin = new Vector2(20f, 0f);
+        itemLabel.rectTransform.offsetMax = new Vector2(-6f, 0f);
+        itemLabel.raycastTarget = true;
+
+        toggle.targetGraphic = bgGo.GetComponent<Image>();
+        toggle.graphic = checkGo.GetComponent<Image>();
+        var scroll = templateGo.GetComponent<ScrollRect>();
+        scroll.content = content;
+        scroll.viewport = viewport;
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        return template;
+    }
+
+    private void OnFollowDropdownChanged(int index)
+    {
+        if (ignoreFollowDropdown)
+            return;
+        if (index < 0 || index >= followDropdownIds.Count)
+            return;
+        followTrackId = followDropdownIds[index];
+        if (followLocked)
+        {
+            followSnap = true;
+            followSmoothVel = Vector3.zero;
+            ApplyFollowCamera();
+        }
+        RefreshFollowHint();
+    }
+
+    private void RefreshFollowDropdown(HashSet<string> used)
+    {
+        EnsureFollowDropdown();
+        if (followDropdown == null)
+            return;
+        var ids = new List<string>();
+        foreach (string id in used)
+        {
+            if (!string.IsNullOrWhiteSpace(id))
+                ids.Add(id);
+        }
+        ids.Sort(System.StringComparer.Ordinal);
+        bool changed = ids.Count != followDropdownIds.Count;
+        if (!changed)
+        {
+            for (int i = 0; i < ids.Count; i++)
+            {
+                if (ids[i] != followDropdownIds[i])
+                {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (changed)
+        {
+            followDropdownIds.Clear();
+            followDropdownIds.AddRange(ids);
+            ignoreFollowDropdown = true;
+            followDropdown.ClearOptions();
+            var options = new List<Dropdown.OptionData>();
+            for (int i = 0; i < followDropdownIds.Count; i++)
+                options.Add(new Dropdown.OptionData(followDropdownIds[i]));
+            followDropdown.AddOptions(options);
+            ignoreFollowDropdown = false;
+        }
+        if (followDropdownIds.Count == 0)
+        {
+            if (followLocked)
+                UnlockFollow();
+            followTrackId = null;
+            RefreshFollowHint();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(followTrackId) || !followDropdownIds.Contains(followTrackId))
+            followTrackId = followDropdownIds[0];
+        int selected = followDropdownIds.IndexOf(followTrackId);
+        ignoreFollowDropdown = true;
+        followDropdown.SetValueWithoutNotify(Mathf.Max(0, selected));
+        followDropdown.RefreshShownValue();
+        ignoreFollowDropdown = false;
+        RefreshFollowHint();
+    }
+
+    private void RefreshFollowHint()
+    {
+        if (followHint == null)
+            return;
+        if (followLocked && !string.IsNullOrWhiteSpace(followTrackId))
+            followHint.text = "已锁定 " + followTrackId + "  ·  B 解锁";
+        else
+            followHint.text = "B 锁定飞机视角";
+    }
+
     private void Navigate()
     {
         if (flightCamera == null || viewImage == null || !viewImage.gameObject.activeInHierarchy)
             return;
-        if (IsTyping())
-            return;
+
+        // 面板把 MouseUp 吃掉时，按住状态仍能松开漫游，避免点完 UI 三维再也拖不动。
+        if (!Input.GetMouseButton(0))
+            orbiting = false;
+        if (!Input.GetMouseButton(1))
+        {
+            flying = false;
+            zoomDragging = false;
+            if (Cursor.lockState != CursorLockMode.None)
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+        }
+        if (!Input.GetMouseButton(2))
+            panning = false;
 
         bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
-        bool over = IsPointerOverView();
+        bool overView = IsPointerOverView();
+        bool overPanel = MouseOverConfigPanel();
+        bool over = overView && !overPanel && !IsOverFollowDropdown();
+        if (over && (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2)))
+            ClearUiFocus();
         float mx = Input.GetAxis("Mouse X");
         float my = Input.GetAxis("Mouse Y");
         float scroll = Input.mouseScrollDelta.y;
@@ -1553,19 +2577,8 @@ public class FlightSceneView : MonoBehaviour
             orbiting = true;
             orbitPivot = flightCamera.transform.position + flightCamera.transform.forward * orbitDistance;
         }
-        if (Input.GetMouseButtonUp(1))
-        {
-            flying = false;
-            zoomDragging = false;
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        }
-        if (Input.GetMouseButtonUp(2))
-            panning = false;
-        if (Input.GetMouseButtonUp(0))
-            orbiting = false;
 
-        if (over && Input.GetKeyDown(KeyCode.F))
+        if (over && !IsTyping() && Input.GetKeyDown(KeyCode.F))
         {
             FrameCamera(lastFocus, lastHeading, lastSpan, true);
             return;
@@ -1616,7 +2629,9 @@ public class FlightSceneView : MonoBehaviour
 
         if (over)
         {
-            Vector3 keys = new Vector3(Input.GetAxis("Horizontal"), 0f, Input.GetAxis("Vertical"));
+            Vector3 keys = IsTyping()
+                ? Vector3.zero
+                : new Vector3(Input.GetAxis("Horizontal"), 0f, Input.GetAxis("Vertical"));
             if (Input.GetKey(KeyCode.E)) keys.y += 1f;
             if (Input.GetKey(KeyCode.Q)) keys.y -= 1f;
             if (keys.sqrMagnitude > 0.01f)
@@ -1676,6 +2691,47 @@ public class FlightSceneView : MonoBehaviour
             return false;
         var selected = EventSystem.current.currentSelectedGameObject;
         return selected != null && selected.GetComponent<InputField>() != null;
+    }
+
+    private static void ClearUiFocus()
+    {
+        GUI.FocusControl(null);
+        GUIUtility.hotControl = 0;
+        GUIUtility.keyboardControl = 0;
+        if (EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null)
+            EventSystem.current.SetSelectedGameObject(null);
+    }
+
+    private static bool MouseOverConfigPanel()
+    {
+        if (RadarStationTuner.Instance != null && RadarStationTuner.Instance.ContainsMouse())
+            return true;
+        if (DifferenceLabelTuner.Instance != null && DifferenceLabelTuner.Instance.ContainsMouse())
+            return true;
+        if (ChaseCamTuner.Instance != null && ChaseCamTuner.Instance.ContainsMouse())
+            return true;
+        var pin = FindAnyObjectByType<ReferencePlanePin>(FindObjectsInactive.Include);
+        return pin != null && pin.ContainsMouse();
+    }
+
+    private bool IsOverFollowDropdown()
+    {
+        if (followDropdown == null)
+            return false;
+        var rt = followDropdown.transform as RectTransform;
+        if (rt == null)
+            return false;
+        var canvas = viewImage != null ? viewImage.canvas : null;
+        Camera uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        if (RectTransformUtility.RectangleContainsScreenPoint(rt, Input.mousePosition, uiCamera))
+            return true;
+        var template = followDropdown.template;
+        if (template != null && template.gameObject.activeInHierarchy
+            && RectTransformUtility.RectangleContainsScreenPoint(template, Input.mousePosition, uiCamera))
+            return true;
+        return false;
     }
 
     private bool placedDefaultCamera;
@@ -1879,6 +2935,8 @@ public class FlightSceneView : MonoBehaviour
         lastFocus = focus;
         lastHeading = heading;
         lastSpan = span;
+        if (followLocked)
+            return;
         if (flightCamera == null || (userHasControl && !force))
             return;
         if (force)
@@ -1889,7 +2947,7 @@ public class FlightSceneView : MonoBehaviour
         orbitPivot = focus;
         float rad = heading * Mathf.Deg2Rad;
         Vector3 forward = new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad));
-        flightCamera.farClipPlane = Mathf.Max(250000f, dist * 3f);
+        ApplyClipPlanes(flightCamera);
         flightCamera.transform.position = focus - forward * dist + Vector3.up * dist * 0.38f;
         flightCamera.transform.LookAt(focus + Vector3.up * dist * 0.05f);
         SyncAnglesFromCamera();
