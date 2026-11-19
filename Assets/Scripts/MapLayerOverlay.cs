@@ -185,9 +185,18 @@ public static class MapLayerOrder
             double area = -1.0;
             var marker = child.GetComponent<MapLayerImage>();
             if (marker != null && marker.layer != null)
+            {
                 area = marker.layer.Area;
-            else if (child.GetComponent<MapInsetOverlay>() != null)
-                area = Math.Abs(child.rect.width * child.rect.height);
+            }
+            else
+            {
+                var inset = child.GetComponent<MapInsetOverlay>();
+                if (inset != null)
+                {
+                    // 必须和分块层用同一量纲（平方度），否则像素面积会把它排到最底被盖住。
+                    area = Math.Abs(inset.LonMax - inset.LonMin) * Math.Abs(inset.LatMax - inset.LatMin);
+                }
+            }
             if (area < 0.0)
                 continue;
             insets.Add(child);
