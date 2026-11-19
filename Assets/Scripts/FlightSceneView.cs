@@ -411,7 +411,7 @@ public class FlightSceneView : MonoBehaviour
                 SharpenMapTexture(hdTexture);
                 hdGlobeMaterial.mainTexture = hdTexture;
                 hdGlobeMaterial.SetTexture("_MainTex", hdTexture);
-                hdGlobeMaterial.SetFloat("_EdgeSoft", 0.006f);
+                hdGlobeMaterial.SetFloat("_EdgeSoft", 0.002f);
             }
             hdPatch.gameObject.SetActive(true);
         }
@@ -512,6 +512,8 @@ public class FlightSceneView : MonoBehaviour
             SharpenMapTexture(layer.texture);
             patch.material.mainTexture = layer.texture;
             patch.material.SetTexture("_MainTex", layer.texture);
+            // 只有最外层往绿色渐隐；内层若渐隐会在上一层图上画出绿边。
+            patch.material.SetFloat("_EdgeSoft", i == 0 ? 0.03f : 0.002f);
             patch.transform.gameObject.SetActive(true);
         }
 
