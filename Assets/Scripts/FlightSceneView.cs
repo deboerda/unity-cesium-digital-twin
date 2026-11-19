@@ -418,8 +418,86 @@ public class FlightSceneView : MonoBehaviour
         else if (hdPatch != null)
             hdPatch.gameObject.SetActive(false);
 
+        BuildMapLayerPatches(lat0, lng0, radius);
+
         if (flightCamera != null)
             flightCamera.farClipPlane = Mathf.Max(flightCamera.farClipPlane, radius * 20f, 4000000f);
+    }
+
+    private sealed class LayerPatch
+    {
+        public Transform transform;
+        public Material material;
+    }
+
+    private readonly List<LayerPatch> layerPatches = new List<LayerPatch>();
+
+    private LayerPatch GetLayerPatch(int index)
+    {
+        while (layerPatches.Count <= index)
+        {
+            int i = layerPatches.Count;
+            var existing = root.Find("MapGlobeLayer_" + i);
+            var t = existing != null ? existing : new GameObject("MapGlobeLayer_" + i).transform;
+            t.SetParent(root, false);
+            if (t.GetComponent<MeshFilter>() == null)
+                t.gameObject.AddComponent<MeshFilter>();
+            if (t.GetComponent<MeshRenderer>() == null)
+                t.gameObject.AddComponent<MeshRenderer>();
+            var sh = Shader.Find("HK132/MapGlobe");
+            if (sh == null)
+                sh = Shader.Find("Unlit/Texture");
+            var mat = new Material(sh != null ? sh : Shader.Find("Sprites/Default"));
+            mat.SetColor("_EdgeColor", GlobeGreen);
+            mat.SetFloat("_EdgeSoft", 0.01f);
+            mat.color = Color.white;
+            var r = t.GetComponent<MeshRenderer>();
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            SetLayer(t.gameObject);
+            layerPatches.Add(new LayerPatch { transform = t, material = mat });
+        }
+        return layerPatches[index];
+    }
+
+    /// <summary>三维同样叠 MapLayers.json 的每一层，大范围在下、高清在上。</summary>
+    private void BuildMapLayerPatches(float lat0, float lng0, float radius)
+    {
+        var layers = MapLayerCatalog.Layers;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            var layer = layers[i];
+            var def = layer?.def;
+            if (def == null || layer.texture == null)
+                continue;
+
+            var patch = GetLayerPatch(i);
+            Vector3 sw = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)def.lonMin, (float)def.latMin, 0f, lat0, lng0));
+            Vector3 se = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)def.lonMax, (float)def.latMin, 0f, lat0, lng0));
+            Vector3 nw = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)def.lonMin, (float)def.latMax, 0f, lat0, lng0));
+            Vector3 ne = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)def.lonMax, (float)def.latMax, 0f, lat0, lng0));
+            Vector3 center = (sw + se + nw + ne) * 0.25f;
+            float w = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(se.x, 0f, se.z)));
+            float d = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(nw.x, 0f, nw.z)));
+            // 层间留够间距，远距离下深度精度不足会 z-fight。
+            float lift = 0.04f + 0.03f * i;
+
+            patch.transform.GetComponent<MeshFilter>().sharedMesh = BuildGlobePatchMesh(center, w, d, radius, lift);
+            patch.transform.position = Vector3.zero;
+            patch.transform.rotation = Quaternion.identity;
+            patch.transform.localScale = Vector3.one;
+            SharpenMapTexture(layer.texture);
+            patch.material.mainTexture = layer.texture;
+            patch.material.SetTexture("_MainTex", layer.texture);
+            patch.transform.gameObject.SetActive(true);
+        }
+
+        for (int i = layers.Count; i < layerPatches.Count; i++)
+        {
+            if (layerPatches[i]?.transform != null)
+                layerPatches[i].transform.gameObject.SetActive(false);
+        }
     }
 
     private static Mesh BuildGlobePatchMesh(Vector3 center, float width, float depth, float radius, float lift)

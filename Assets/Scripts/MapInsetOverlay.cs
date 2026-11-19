@@ -96,13 +96,7 @@ public class MapInsetOverlay : MonoBehaviour
         var img = GetComponent<UnityEngine.UI.Image>();
         if (img != null)
             img.raycastTarget = false;
-        // 插图必须垫底，飞机/雷达/轨迹在上面。
-        rect.SetAsFirstSibling();
-        var planes = display.MapRoot.Find("PlaneIcons");
-        var overlay = display.MapRoot.Find("MapOverlay");
-        if (planes != null)
-            planes.SetAsLastSibling();
-        if (overlay != null)
-            overlay.SetAsLastSibling();
+        // 所有贴图层按范围从大到小垫底，飞机、雷达在上面；统一由 MapLayerOrder 排。
+        MapLayerOrder.Apply(display.MapRoot);
     }
 }

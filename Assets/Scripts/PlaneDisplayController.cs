@@ -158,6 +158,8 @@ public class PlaneDisplayController : MonoBehaviour
         // Create the overlay before data-driven objects so it always remains the top map layer.
         GetPlaneLayerRoot();
         GetMapOverlayRoot();
+        if (GetComponent<MapLayerOverlay2D>() == null)
+            gameObject.AddComponent<MapLayerOverlay2D>();
         var store = PanelMemory.Load();
         ApplyMemory(store);
         if (store.planeIcon != null && store.planeIcon.saved)
@@ -229,13 +231,7 @@ public class PlaneDisplayController : MonoBehaviour
 
     private void LateUpdate()
     {
-        var inset = mapRoot != null ? mapRoot.Find("飞行范围插图") : null;
-        if (inset != null)
-            inset.SetAsFirstSibling();
-        if (planeLayerRoot != null)
-            planeLayerRoot.SetAsLastSibling();
-        if (mapOverlayRoot != null)
-            mapOverlayRoot.SetAsLastSibling();
+        MapLayerOrder.Apply(mapRoot);
         ApplyIconScreenScale();
     }
 
