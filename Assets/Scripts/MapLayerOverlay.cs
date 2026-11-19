@@ -77,40 +77,42 @@ public static class MapLayerCatalog
         loaded = true;
         layers.Clear();
 
+        var defs = new List<MapLayerDef>();
+
+        // 1) Resources/MapLayers 下由 Tools/build_map_tiles.py 生成的分块清单。
+        var assets = Resources.LoadAll<TextAsset>("MapLayers");
+        for (int i = 0; i < assets.Length; i++)
+        {
+            var asset = assets[i];
+            if (asset == null || !asset.name.EndsWith("_manifest", StringComparison.Ordinal))
+                continue;
+            CollectDefs(asset.text, defs);
+        }
+
+        // 2) StreamingAssets/MapLayers.json：手工补充或微调用的入口。
         string path = Path.Combine(Application.streamingAssetsPath, "MapLayers.json");
-        string json = null;
         try
         {
             if (File.Exists(path))
-                json = File.ReadAllText(path);
+                CollectDefs(File.ReadAllText(path), defs);
         }
         catch (Exception ex)
         {
             Debug.LogWarning($"[MapLayers] 读取 {path} 失败: {ex.Message}");
         }
-        if (string.IsNullOrWhiteSpace(json))
-            return;
 
-        MapLayerFile file = null;
-        try
-        {
-            file = JsonUtility.FromJson<MapLayerFile>(json);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"[MapLayers] MapLayers.json 解析失败: {ex.Message}");
-        }
-        if (file?.layers == null)
-            return;
-
-        foreach (var def in file.layers)
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var def in defs)
         {
             if (def == null || string.IsNullOrWhiteSpace(def.image))
                 continue;
-            var tex = Resources.Load<Texture2D>(def.image.Trim());
+            string key = def.image.Trim();
+            if (!seen.Add(key))
+                continue;
+            var tex = Resources.Load<Texture2D>(key);
             if (tex == null)
             {
-                Debug.LogWarning($"[MapLayers] 找不到 Resources/{def.image}，跳过 {def.name}");
+                Debug.LogWarning($"[MapLayers] 找不到 Resources/{key}，跳过 {def.name}");
                 continue;
             }
             tex.filterMode = FilterMode.Bilinear;
@@ -130,6 +132,29 @@ public static class MapLayerCatalog
 
         // 范围大的排前面（画在下面），范围小的压在上面。
         layers.Sort((a, b) => b.Area.CompareTo(a.Area));
+    }
+
+    private static void CollectDefs(string json, List<MapLayerDef> into)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+        MapLayerFile file = null;
+        try
+        {
+            file = JsonUtility.FromJson<MapLayerFile>(json);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[MapLayers] 清单解析失败: {ex.Message}");
+            return;
+        }
+        if (file?.layers == null)
+            return;
+        for (int i = 0; i < file.layers.Count; i++)
+        {
+            if (file.layers[i] != null)
+                into.Add(file.layers[i]);
+        }
     }
 }
 

@@ -1,22 +1,3 @@
 {
-  "layers": [
-    {
-      "name": "大范围 z11",
-      "image": "MapLayers/地图层_大_z11",
-      "lonMin": 101.04,
-      "latMin": 28.12,
-      "lonMax": 106.66,
-      "latMax": 32.97,
-      "zoom": 11
-    },
-    {
-      "name": "中范围 z12",
-      "image": "MapLayers/地图层_中_z12",
-      "lonMin": 102.45,
-      "latMin": 29.4,
-      "lonMax": 105.26,
-      "latMax": 31.82,
-      "zoom": 12
-    }
-  ]
+  "layers": []
 }

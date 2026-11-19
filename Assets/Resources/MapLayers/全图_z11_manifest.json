@@ -1,0 +1,76 @@
+{
+  "layers": [
+    {
+      "name": "全图_z11 1-1",
+      "image": "MapLayers/全图_z11_00",
+      "lonMin": 97.2,
+      "lonMax": 101.633333,
+      "latMin": 30.647747,
+      "latMax": 34.9,
+      "zoom": 11,
+      "width": 6456,
+      "height": 7368,
+      "missingTiles": 0
+    },
+    {
+      "name": "全图_z11 1-2",
+      "image": "MapLayers/全图_z11_01",
+      "lonMin": 101.633333,
+      "lonMax": 106.066667,
+      "latMin": 30.647747,
+      "latMax": 34.9,
+      "zoom": 11,
+      "width": 6457,
+      "height": 7368,
+      "missingTiles": 0
+    },
+    {
+      "name": "全图_z11 1-3",
+      "image": "MapLayers/全图_z11_02",
+      "lonMin": 106.066667,
+      "lonMax": 110.5,
+      "latMin": 30.647747,
+      "latMax": 34.9,
+      "zoom": 11,
+      "width": 6456,
+      "height": 7368,
+      "missingTiles": 0
+    },
+    {
+      "name": "全图_z11 2-1",
+      "image": "MapLayers/全图_z11_10",
+      "lonMin": 97.2,
+      "lonMax": 101.633333,
+      "latMin": 26.2,
+      "latMax": 30.647747,
+      "zoom": 11,
+      "width": 6456,
+      "height": 7369,
+      "missingTiles": 0
+    },
+    {
+      "name": "全图_z11 2-2",
+      "image": "MapLayers/全图_z11_11",
+      "lonMin": 101.633333,
+      "lonMax": 106.066667,
+      "latMin": 26.2,
+      "latMax": 30.647747,
+      "zoom": 11,
+      "width": 6457,
+      "height": 7369,
+      "missingTiles": 0
+    },
+    {
+      "name": "全图_z11 2-3",
+      "image": "MapLayers/全图_z11_12",
+      "lonMin": 106.066667,
+      "lonMax": 110.5,
+      "latMin": 26.2,
+      "latMax": 30.647747,
+      "zoom": 11,
+      "width": 6456,
+      "height": 7369,
+      "missingTiles": 0
+    }
+  ]
+}

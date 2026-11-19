@@ -502,8 +502,9 @@ public class FlightSceneView : MonoBehaviour
             Vector3 center = (sw + se + nw + ne) * 0.25f;
             float w = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(se.x, 0f, se.z)));
             float d = Mathf.Max(1f, Vector3.Distance(new Vector3(sw.x, 0f, sw.z), new Vector3(nw.x, 0f, nw.z)));
-            // 层间留够间距，远距离下深度精度不足会 z-fight。
-            float lift = 0.04f + 0.03f * i;
+            // 层高按缩放级别排：级别越高越靠上，同级别互不重叠。
+            int lvl = def.zoom > 0 ? def.zoom : 12;
+            float lift = 0.02f + 0.025f * Mathf.Max(0, lvl - 10);
 
             patch.transform.GetComponent<MeshFilter>().sharedMesh = BuildGlobePatchMesh(center, w, d, radius, lift);
             patch.transform.position = Vector3.zero;
@@ -512,8 +513,8 @@ public class FlightSceneView : MonoBehaviour
             SharpenMapTexture(layer.texture);
             patch.material.mainTexture = layer.texture;
             patch.material.SetTexture("_MainTex", layer.texture);
-            // 只有最外层往绿色渐隐；内层若渐隐会在上一层图上画出绿边。
-            patch.material.SetFloat("_EdgeSoft", i == 0 ? 0.03f : 0.002f);
+            // 分块贴图之间不能渐隐，否则相邻块会露出绿色缝。
+            patch.material.SetFloat("_EdgeSoft", 0.002f);
             patch.transform.gameObject.SetActive(true);
         }
 
