@@ -431,6 +431,10 @@ public class FlightSceneView : MonoBehaviour
     }
 
     private readonly List<LayerPatch> layerPatches = new List<LayerPatch>();
+    private float layerPatchRadius = -1f;
+    private float layerPatchLat0;
+    private float layerPatchLng0;
+    private int layerPatchCount = -1;
 
     private LayerPatch GetLayerPatch(int index)
     {
@@ -465,6 +469,24 @@ public class FlightSceneView : MonoBehaviour
     private void BuildMapLayerPatches(float lat0, float lng0, float radius)
     {
         var layers = MapLayerCatalog.Layers;
+        // RefreshGlobe 每 0.2 秒跑一次，几何没变就别重建网格。
+        if (layerPatchCount == layers.Count
+            && Mathf.Approximately(layerPatchRadius, radius)
+            && Mathf.Approximately(layerPatchLat0, lat0)
+            && Mathf.Approximately(layerPatchLng0, lng0))
+        {
+            for (int i = 0; i < layerPatches.Count; i++)
+            {
+                if (layerPatches[i]?.transform != null)
+                    layerPatches[i].transform.gameObject.SetActive(i < layers.Count);
+            }
+            return;
+        }
+        layerPatchCount = layers.Count;
+        layerPatchRadius = radius;
+        layerPatchLat0 = lat0;
+        layerPatchLng0 = lng0;
+
         for (int i = 0; i < layers.Count; i++)
         {
             var layer = layers[i];
