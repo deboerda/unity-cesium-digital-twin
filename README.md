@@ -106,4 +106,4 @@ Packages/manifest.json       包引用
 
 ## 版本
 
-见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.6** 为当前发版：整幅范围按 z11 分块铺满、中间再叠 z12 与 z14，二维三维同一套贴图，全图不再只有中心一块清楚。
+见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.6** 为当前发版：整幅范围按 z12 分 20 块铺满，中心再叠 z14 飞行范围插图，二维三维共用同一套贴图，全图任何位置放大到 32 倍都清晰，不再有中间方块。

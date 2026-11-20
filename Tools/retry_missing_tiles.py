@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CACHE = Path(r"E:\UNITYproject\HK132CWIN7\Assets\Pictures\_hd_tile_cache")
@@ -43,25 +45,34 @@ def main() -> int:
     for rnd in range(rounds):
         if not bad:
             break
-        print(f"round {rnd + 1}: trying {len(bad)}", flush=True)
-        still = []
-        for i, p in enumerate(bad):
+        print(f"round {rnd + 1}: trying {len(bad)} with {workers} workers", flush=True)
+        results: list[bool] = []
+        counter = {"n": 0}
+        lock = threading.Lock()
+
+        def work(p: Path) -> bool:
             parts = p.stem.split("_")
             tx, ty = parts[1], parts[2]
             raw = UPSTREAM.format(z=zoom, x=tx, y=ty)
             url = WESERV.format(u=raw.replace(":", "%3A").replace("/", "%2F"))
+            time.sleep(0.2)
             subprocess.run(
                 ["curl.exe", "-sS", "--noproxy", "*", "--connect-timeout", "10",
                  "--max-time", "45", "-A", UA, "-o", str(p), url],
                 timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            if ok(p):
-                total_fixed += 1
-            else:
-                still.append(p)
-            if (i + 1) % 20 == 0:
-                print(f"  {i + 1}/{len(bad)} fixed={total_fixed}", flush=True)
-            time.sleep(max(0.0, 0.35))
+            good = ok(p)
+            with lock:
+                counter["n"] += 1
+                if counter["n"] % 100 == 0:
+                    print(f"  {counter['n']}/{len(bad)}", flush=True)
+            return good
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(work, bad))
+        still = [p for p, good in zip(bad, results) if not good]
+        total_fixed += len(bad) - len(still)
         bad = still
+        print(f"round {rnd + 1}: fixed so far={total_fixed} remaining={len(bad)}", flush=True)
         if bad:
             time.sleep(20 + rnd * 20)
 
