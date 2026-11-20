@@ -185,8 +185,21 @@ public class ReferencePlanePin : MonoBehaviour
             SavePlaneScale();
         if (GUILayout.Button("定位到地图", GUILayout.Height(24f)))
             ApplyLonLat();
+        if (GUILayout.Button("清除所有飞机", GUILayout.Height(24f)))
+            ClearAllAircraft();
 
         GUI.DragWindow(new Rect(0f, 0f, 10000f, 22f));
+    }
+
+    /// <summary>切换数据批次时用：立刻清掉上一批飞机与航迹。</summary>
+    private void ClearAllAircraft()
+    {
+        var receiver = FlightDataStreamReceiver.Instance;
+        if (receiver != null)
+            receiver.ClearAllTracks();
+        var display = FindAnyObjectByType<PlaneDisplayController>(FindObjectsInactive.Include);
+        if (display != null)
+            display.ClearAllTrails();
     }
 
     private float NumberRow(string key, string label, float value, float min, float max)

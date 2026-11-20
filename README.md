@@ -106,4 +106,4 @@ Packages/manifest.json       包引用
 
 ## 版本
 
-见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.8** 为当前发版：整幅范围按 z12 分 20 块铺满，中心再叠 z14 高清区（1.66°×1.0°，6 块）；二维差值面板支持点表头排序。
+见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.9** 为当前发版：整幅 z12 分块 + 中心 z14 高清区；二维差值面板支持表头排序；超过 10 秒没有新位置的飞机会自动清掉，F4 面板可「清除所有飞机」。

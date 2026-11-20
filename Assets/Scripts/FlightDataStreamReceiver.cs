@@ -105,6 +105,10 @@ public class FlightDataStreamReceiver : MonoBehaviour
     [SerializeField] private bool listenOnAllInterfaces = true;
     [SerializeField] private int listenBacklog = 1;
 
+    [Header("Stale Data")]
+    [Tooltip("某架飞机超过这么多秒没有新位置，就按历史数据清掉，避免上一批飞机一直挂在画面上。<=0 表示不自动清。")]
+    [SerializeField] private float staleTrackSeconds = 10f;
+
     [Header("Debug")]
     [SerializeField] private bool enableDebugLog = true;
     [SerializeField] private bool logIncomingMessageTypes = false;
@@ -123,6 +127,8 @@ public class FlightDataStreamReceiver : MonoBehaviour
     private readonly object dataLock = new object();
 
     private readonly Dictionary<string, TrackPosition> latestPositionsByTrack = new Dictionary<string, TrackPosition>();
+    /// <summary>每架飞机最后一次收到位置的时刻，用于清理上一批遗留的“死数据”。</summary>
+    private readonly Dictionary<string, DateTime> lastPositionUtcByTrack = new Dictionary<string, DateTime>(StringComparer.Ordinal);
     private readonly Dictionary<string, TrackLine> latestTrackLinesByTrack = new Dictionary<string, TrackLine>();
     private readonly Dictionary<string, TrackTimetableState> latestStatesByTrack = new Dictionary<string, TrackTimetableState>();
     private readonly Dictionary<string, TrackTimetableState> latestSensorsByKey = new Dictionary<string, TrackTimetableState>();
@@ -214,9 +220,58 @@ public class FlightDataStreamReceiver : MonoBehaviour
         {
             lock (dataLock)
             {
-                return new List<TrackPosition>(latestPositionsByTrack.Values);
+                var now = DateTime.UtcNow;
+                var list = new List<TrackPosition>(latestPositionsByTrack.Count);
+                foreach (var kv in latestPositionsByTrack)
+                {
+                    if (IsStaleUnsafe(kv.Key, now))
+                        continue;
+                    list.Add(kv.Value);
+                }
+                return list;
             }
         }
+    }
+
+    /// <summary>该飞机是否已经太久没有新位置（历史遗留数据）。</summary>
+    private bool IsStaleUnsafe(string trackId, DateTime nowUtc)
+    {
+        if (staleTrackSeconds <= 0f)
+            return false;
+        if (string.IsNullOrWhiteSpace(trackId))
+            return true;
+        if (!lastPositionUtcByTrack.TryGetValue(trackId, out var lastUtc))
+            return false;
+        return (nowUtc - lastUtc).TotalSeconds > staleTrackSeconds;
+    }
+
+    /// <summary>手动清掉所有飞机与相关缓存，用于切换数据批次时立即回到干净状态。</summary>
+    public void ClearAllTracks()
+    {
+        lock (dataLock)
+        {
+            latestPositionsByTrack.Clear();
+            lastPositionUtcByTrack.Clear();
+            latestTrackLinesByTrack.Clear();
+            latestStatesByTrack.Clear();
+            latestSensorsByKey.Clear();
+            latestCycleRecords.Clear();
+            latestCycleUpdatedTrackIds.Clear();
+            latestCycleFlightTime = null;
+            previousHeadingByTrack.Clear();
+            previousTimeByTrack.Clear();
+            latestValuesByTrack.Clear();
+            primaryTrackId = null;
+            latestEventTableFlightTime = string.Empty;
+            eventTableFrameCount = 0;
+            eventTableSummaryLogged = false;
+            cycleTableSummaryLogged = false;
+            trackPositionsResponseCount = 0;
+            lastTrackPositionsHadRenderableRoute = false;
+            lastTrackPositionsSummary = string.Empty;
+            warnedNonRenderableTrackPositions = false;
+        }
+        Log("All tracks cleared");
     }
     public List<TrackTimetableState> SnapshotStates
     {
@@ -224,7 +279,15 @@ public class FlightDataStreamReceiver : MonoBehaviour
         {
             lock (dataLock)
             {
-                return new List<TrackTimetableState>(latestStatesByTrack.Values);
+                var now = DateTime.UtcNow;
+                var list = new List<TrackTimetableState>(latestStatesByTrack.Count);
+                foreach (var kv in latestStatesByTrack)
+                {
+                    if (IsStaleUnsafe(kv.Key, now))
+                        continue;
+                    list.Add(kv.Value);
+                }
+                return list;
             }
         }
     }
@@ -236,7 +299,15 @@ public class FlightDataStreamReceiver : MonoBehaviour
         {
             lock (dataLock)
             {
-                return new List<TrackTimetableState>(latestSensorsByKey.Values);
+                var now = DateTime.UtcNow;
+                var list = new List<TrackTimetableState>(latestSensorsByKey.Count);
+                foreach (var kv in latestSensorsByKey)
+                {
+                    if (kv.Value == null || IsStaleUnsafe(kv.Value.trackId, now))
+                        continue;
+                    list.Add(kv.Value);
+                }
+                return list;
             }
         }
     }
@@ -269,21 +340,22 @@ public class FlightDataStreamReceiver : MonoBehaviour
     {
         lock (dataLock)
         {
+            var now = DateTime.UtcNow;
             var ids = new List<string>();
             foreach (var kv in latestPositionsByTrack)
             {
-                if (!string.IsNullOrWhiteSpace(kv.Key) && !ids.Contains(kv.Key))
+                if (!string.IsNullOrWhiteSpace(kv.Key) && !IsStaleUnsafe(kv.Key, now) && !ids.Contains(kv.Key))
                     ids.Add(kv.Key);
             }
             foreach (var kv in latestStatesByTrack)
             {
-                if (!string.IsNullOrWhiteSpace(kv.Key) && !ids.Contains(kv.Key))
+                if (!string.IsNullOrWhiteSpace(kv.Key) && !IsStaleUnsafe(kv.Key, now) && !ids.Contains(kv.Key))
                     ids.Add(kv.Key);
             }
             foreach (var kv in latestSensorsByKey)
             {
                 string id = kv.Value != null ? kv.Value.trackId : null;
-                if (!string.IsNullOrWhiteSpace(id) && !ids.Contains(id))
+                if (!string.IsNullOrWhiteSpace(id) && !IsStaleUnsafe(id, now) && !ids.Contains(id))
                     ids.Add(id);
             }
             ids.Sort(StringComparer.Ordinal);
@@ -1913,6 +1985,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
         if (roll.HasValue) position.roll = roll.Value;
 
         latestPositionsByTrack[trackId] = position;
+        lastPositionUtcByTrack[trackId] = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(primaryTrackId))
             primaryTrackId = trackId;
         UpdateTurnRate(trackId, position);
@@ -2056,6 +2129,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
         if (pitch.HasValue) position.pitch = pitch.Value;
         if (roll.HasValue) position.roll = roll.Value;
         latestPositionsByTrack[trackId] = position;
+        lastPositionUtcByTrack[trackId] = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(primaryTrackId))
             primaryTrackId = trackId;
         UpdateTurnRate(trackId, position);
@@ -2235,13 +2309,18 @@ public class FlightDataStreamReceiver : MonoBehaviour
 
     private TrackPosition GetPrimaryPositionUnsafe()
     {
-        if (!string.IsNullOrWhiteSpace(primaryTrackId) && latestPositionsByTrack.TryGetValue(primaryTrackId, out var position))
+        var now = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(primaryTrackId)
+            && latestPositionsByTrack.TryGetValue(primaryTrackId, out var position)
+            && !IsStaleUnsafe(primaryTrackId, now))
         {
             return position;
         }
 
         foreach (var kv in latestPositionsByTrack)
         {
+            if (IsStaleUnsafe(kv.Key, now))
+                continue;
             primaryTrackId = kv.Key;
             return kv.Value;
         }

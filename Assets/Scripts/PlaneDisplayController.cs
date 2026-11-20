@@ -90,6 +90,10 @@ public class PlaneDisplayController : MonoBehaviour
     [SerializeField] private bool enableDebugLog = true;
 
     private readonly Dictionary<string, PlaneView> planes = new Dictionary<string, PlaneView>();
+    /// <summary>本帧仍有数据的飞机编号，用于回收已经不存在的飞机图标与航迹。</summary>
+    private readonly HashSet<string> liveTrackScratch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>已经因为没数据被收起来的飞机，数据回来时要重新显示航迹。</summary>
+    private readonly HashSet<string> hiddenStaleTracks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TrackLineView> trackLines = new Dictionary<string, TrackLineView>();
     private readonly Dictionary<string, int> trackColorIndices = new Dictionary<string, int>();
     private readonly Dictionary<string, Color> trailColorOverride = new Dictionary<string, Color>();
@@ -246,18 +250,23 @@ public class PlaneDisplayController : MonoBehaviour
 
         // Update plane icons & realtime trails
         var positions = receiver.SnapshotPositions;
+        liveTrackScratch.Clear();
         if (positions != null && positions.Count > 0)
         {
             foreach (var position in positions)
             {
                 if (position == null)
                     continue;
+                string trackId = position.trackId ?? "primary";
+                liveTrackScratch.Add(trackId);
                 UpdatePlanePosition(
-                    position.trackId ?? "primary",
+                    trackId,
                     (float)position.lng, (float)position.lat, position.alt,
                     position.heading, position.pitch, position.roll);
             }
         }
+        // 上一批飞机没有新数据时要收起来，否则会一直挂着死数据。
+        HideStalePlaneViews(liveTrackScratch);
 
         // Update received track lines (plans → positions as connected lines)
         if (showReceivedTrackLines)
@@ -270,6 +279,40 @@ public class PlaneDisplayController : MonoBehaviour
     }
 
     public void SetLongitudeRange(float min, float max) { longitudeRange = new Vector2(min, max); }
+
+    /// <summary>不在本帧快照里的飞机：收起图标、标签和航迹，避免上一批数据一直挂着。</summary>
+    private void HideStalePlaneViews(HashSet<string> liveIds)
+    {
+        foreach (var kv in planes)
+        {
+            var view = kv.Value;
+            if (view == null)
+                continue;
+
+            bool live = liveIds.Contains(kv.Key);
+            if (live)
+            {
+                if (hiddenStaleTracks.Remove(kv.Key))
+                    ApplyTrailVisuals(kv.Key);
+                continue;
+            }
+
+            hiddenStaleTracks.Add(kv.Key);
+            if (view.icon != null && view.icon.gameObject.activeSelf)
+                view.icon.gameObject.SetActive(false);
+            if (view.label != null && view.label.gameObject.activeSelf)
+                view.label.gameObject.SetActive(false);
+            HideTrail(view.trail);
+            for (int i = 0; i < view.completedTrails.Count; i++)
+                HideTrail(view.completedTrails[i]);
+        }
+    }
+
+    private static void HideTrail(RadarPolylineGraphic graphic)
+    {
+        if (graphic != null && graphic.gameObject.activeSelf)
+            graphic.gameObject.SetActive(false);
+    }
     public void SetLatitudeRange(float min, float max) { latitudeRange = new Vector2(min, max); }
     public void SetGameRange(float minX, float maxX, float minY, float maxY) { xRange = new Vector2(minX, maxX); yRange = new Vector2(minY, maxY); }
 
