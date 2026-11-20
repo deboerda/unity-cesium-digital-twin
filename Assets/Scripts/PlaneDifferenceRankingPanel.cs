@@ -51,11 +51,24 @@ public class PlaneDifferenceRankingPanel : MonoBehaviour
     [SerializeField] private Color accentTextColor = new Color(0.43f, 0.82f, 1f, 1f);
 
     private const float EarthRadiusMeters = 6371000f;
+
+    /// <summary>表头可点击排序的列。</summary>
+    private enum SortColumn
+    {
+        Distance,
+        TrackId,
+        Altitude,
+        Azimuth,
+        Pitch
+    }
+
     private readonly List<RowView> rows = new List<RowView>();
     private readonly List<string> dropdownTrackIds = new List<string>();
     private RowView headerRow;
     private float nextRefreshTime;
     private string selectedTrackId;
+    private SortColumn sortColumn = SortColumn.Distance;
+    private bool sortAscending = true;
     public string SelectedTrackId => selectedTrackId;
 
     private void Awake()
@@ -87,6 +100,8 @@ public class PlaneDifferenceRankingPanel : MonoBehaviour
         {
             headerRow = FindOrCreateHeaderRow();
             SetRowTexts(headerRow, "#", "飞机编号", "距离差", "高度差", "方位角差", "俯仰角差");
+            SetupHeaderSort();
+            UpdateHeaderLabels();
         }
         CollectSceneDataRows();
     }
@@ -149,7 +164,7 @@ public class PlaneDifferenceRankingPanel : MonoBehaviour
             comparisons.Add(pos);
         }
 
-        comparisons.Sort((a, b) => CompareDistance(selected, a, b));
+        comparisons.Sort((a, b) => CompareBy(selected, a, b));
 
         int count = Mathf.Min(maxRows, comparisons.Count);
         EnsureRowCount(count);
@@ -232,6 +247,97 @@ public class PlaneDifferenceRankingPanel : MonoBehaviour
     private int CompareDistance(FlightDataStreamReceiver.TrackPosition selected, FlightDataStreamReceiver.TrackPosition a, FlightDataStreamReceiver.TrackPosition b)
     {
         return CalculateDistanceMeters(selected, a).CompareTo(CalculateDistanceMeters(selected, b));
+    }
+
+    /// <summary>按当前排序列比较；相同值时按距离、再按编号兜底，保证顺序稳定。</summary>
+    private int CompareBy(FlightDataStreamReceiver.TrackPosition selected, FlightDataStreamReceiver.TrackPosition a, FlightDataStreamReceiver.TrackPosition b)
+    {
+        int cmp;
+        switch (sortColumn)
+        {
+            case SortColumn.TrackId:
+                cmp = string.Compare(a?.trackId, b?.trackId, StringComparison.Ordinal);
+                break;
+            case SortColumn.Altitude:
+                cmp = a.alt.CompareTo(b.alt);
+                break;
+            case SortColumn.Azimuth:
+                cmp = RelativeAzimuthDeg(selected, a).CompareTo(RelativeAzimuthDeg(selected, b));
+                break;
+            case SortColumn.Pitch:
+                cmp = Mathf.DeltaAngle(selected.pitch, a.pitch).CompareTo(Mathf.DeltaAngle(selected.pitch, b.pitch));
+                break;
+            default:
+                cmp = CompareDistance(selected, a, b);
+                break;
+        }
+
+        if (!sortAscending)
+            cmp = -cmp;
+        if (cmp == 0)
+            cmp = CompareDistance(selected, a, b);
+        if (cmp == 0)
+            cmp = string.Compare(a?.trackId, b?.trackId, StringComparison.Ordinal);
+        return cmp;
+    }
+
+    // ── 表头点击排序 ──────────────────────────────────────────────
+
+    private void SetupHeaderSort()
+    {
+        if (headerRow == null)
+            return;
+        BindHeaderCell(headerRow.idText, "飞机编号", SortColumn.TrackId);
+        BindHeaderCell(headerRow.distanceText, "距离差", SortColumn.Distance);
+        BindHeaderCell(headerRow.altitudeText, "高度差", SortColumn.Altitude);
+        BindHeaderCell(headerRow.headingText, "方位角差", SortColumn.Azimuth);
+        BindHeaderCell(headerRow.pitchText, "俯仰角差", SortColumn.Pitch);
+    }
+
+    private void BindHeaderCell(Text cell, string label, SortColumn column)
+    {
+        if (cell == null)
+            return;
+        cell.raycastTarget = true;
+        var button = cell.GetComponent<Button>();
+        if (button == null)
+            button = cell.gameObject.AddComponent<Button>();
+        button.transition = Selectable.Transition.None;
+        button.navigation = new Navigation { mode = Navigation.Mode.None };
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(() => OnHeaderClicked(column));
+    }
+
+    private void OnHeaderClicked(SortColumn column)
+    {
+        if (sortColumn == column)
+            sortAscending = !sortAscending;
+        else
+        {
+            sortColumn = column;
+            sortAscending = true;
+        }
+
+        UpdateHeaderLabels();
+        Refresh();
+    }
+
+    private void UpdateHeaderLabels()
+    {
+        if (headerRow == null)
+            return;
+        SetHeaderLabel(headerRow.idText, "飞机编号", SortColumn.TrackId);
+        SetHeaderLabel(headerRow.distanceText, "距离差", SortColumn.Distance);
+        SetHeaderLabel(headerRow.altitudeText, "高度差", SortColumn.Altitude);
+        SetHeaderLabel(headerRow.headingText, "方位角差", SortColumn.Azimuth);
+        SetHeaderLabel(headerRow.pitchText, "俯仰角差", SortColumn.Pitch);
+    }
+
+    private void SetHeaderLabel(Text cell, string label, SortColumn column)
+    {
+        if (cell == null)
+            return;
+        cell.text = sortColumn == column ? $"{label} {(sortAscending ? "↑" : "↓")}" : label;
     }
 
     private static float CalculateDistanceMeters(FlightDataStreamReceiver.TrackPosition a, FlightDataStreamReceiver.TrackPosition b)

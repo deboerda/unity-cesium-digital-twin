@@ -2,7 +2,7 @@
 
 基于 Unity 2022.3 的编队飞行与传感器扫描范围可视化工程。二维地图与三维场景共用同一套位置、姿态和传感器数据。
 
-当前版本 **1.7**。仓库： [unity-cesium-digital-twin](https://github.com/deboerda/unity-cesium-digital-twin)。内部交接见 [交接文档.md](交接文档.md)、[交接讲解稿.md](交接讲解稿.md)。
+当前版本 **1.8**。仓库： [unity-cesium-digital-twin](https://github.com/deboerda/unity-cesium-digital-twin)。内部交接见 [交接文档.md](交接文档.md)、[交接讲解稿.md](交接讲解稿.md)。
 
 ## 环境
 
@@ -106,4 +106,4 @@ Packages/manifest.json       包引用
 
 ## 版本
 
-见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.7** 为当前发版：整幅范围按 z12 分 20 块铺满，中心再叠 z14 高清区（1.66°×1.0°，6 块），二维三维共用同一套贴图；全图放大到 32 倍都清晰，中心附近可达 64 倍以上。
+见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.8** 为当前发版：整幅范围按 z12 分 20 块铺满，中心再叠 z14 高清区（1.66°×1.0°，6 块）；二维差值面板支持点表头排序。
