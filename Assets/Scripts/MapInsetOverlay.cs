@@ -95,7 +95,11 @@ public class MapInsetOverlay : MonoBehaviour
         rect.sizeDelta = max - min;
         var img = GetComponent<UnityEngine.UI.Image>();
         if (img != null)
+        {
             img.raycastTarget = false;
+            // 分块层已经覆盖这块插图（同一缩放级别），再画一遍只会多一层重叠。
+            img.enabled = MapLayerCatalog.Layers.Count == 0;
+        }
         // 所有贴图层按范围从大到小垫底，飞机、雷达在上面；统一由 MapLayerOrder 排。
         MapLayerOrder.Apply(display.MapRoot);
     }

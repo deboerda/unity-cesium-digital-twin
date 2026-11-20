@@ -1,0 +1,76 @@
+{
+  "layers": [
+    {
+      "name": "高清_z14 1-1",
+      "image": "MapLayers/高清_z14_00",
+      "lonMin": 103.25,
+      "lonMax": 103.803333,
+      "latMin": 30.671294,
+      "latMax": 31.17,
+      "zoom": 14,
+      "width": 6446,
+      "height": 6773,
+      "missingTiles": 0
+    },
+    {
+      "name": "高清_z14 1-2",
+      "image": "MapLayers/高清_z14_01",
+      "lonMin": 103.803333,
+      "lonMax": 104.356667,
+      "latMin": 30.671294,
+      "latMax": 31.17,
+      "zoom": 14,
+      "width": 6447,
+      "height": 6773,
+      "missingTiles": 0
+    },
+    {
+      "name": "高清_z14 1-3",
+      "image": "MapLayers/高清_z14_02",
+      "lonMin": 104.356667,
+      "lonMax": 104.91,
+      "latMin": 30.671294,
+      "latMax": 31.17,
+      "zoom": 14,
+      "width": 6447,
+      "height": 6773,
+      "missingTiles": 0
+    },
+    {
+      "name": "高清_z14 2-1",
+      "image": "MapLayers/高清_z14_10",
+      "lonMin": 103.25,
+      "lonMax": 103.803333,
+      "latMin": 30.17,
+      "latMax": 30.671294,
+      "zoom": 14,
+      "width": 6446,
+      "height": 6773,
+      "missingTiles": 0
+    },
+    {
+      "name": "高清_z14 2-2",
+      "image": "MapLayers/高清_z14_11",
+      "lonMin": 103.803333,
+      "lonMax": 104.356667,
+      "latMin": 30.17,
+      "latMax": 30.671294,
+      "zoom": 14,
+      "width": 6447,
+      "height": 6773,
+      "missingTiles": 0
+    },
+    {
+      "name": "高清_z14 2-3",
+      "image": "MapLayers/高清_z14_12",
+      "lonMin": 104.356667,
+      "lonMax": 104.91,
+      "latMin": 30.17,
+      "latMax": 30.671294,
+      "zoom": 14,
+      "width": 6447,
+      "height": 6773,
+      "missingTiles": 0
+    }
+  ]
+}

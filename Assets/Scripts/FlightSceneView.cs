@@ -391,7 +391,9 @@ public class FlightSceneView : MonoBehaviour
             mapGlobeMaterial.SetFloat("_EdgeSoft", 0.055f);
         }
         var inset = FindAnyObjectByType<MapInsetOverlay>(FindObjectsInactive.Include);
-        if (inset != null)
+        // 分块层已经覆盖了原来那块插图，且缩放级别相同；两层都画会 z-fight。
+        bool catalogCoversInset = MapLayerCatalog.Layers.Count > 0;
+        if (inset != null && !catalogCoversInset)
         {
             hdTexture = inset.OverlayTexture ?? hdTexture;
             Vector3 hdSw = ToVisual(RadarDetectionSystem.GeoToLocalMeters((float)inset.LonMin, (float)inset.LatMin, 0f, lat0, lng0));
@@ -523,7 +525,23 @@ public class FlightSceneView : MonoBehaviour
             if (layerPatches[i]?.transform != null)
                 layerPatches[i].transform.gameObject.SetActive(false);
         }
+
+        if (!layerBuildLogged)
+        {
+            layerBuildLogged = true;
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"[MapLayers3D] patches={layers.Count}");
+            for (int i = 0; i < layers.Count && i < 3; i++)
+            {
+                var d = layers[i]?.def;
+                if (d != null)
+                    sb.Append($" | {d.name} z{d.zoom} lon[{d.lonMin:F3},{d.lonMax:F3}] lat[{d.latMin:F3},{d.latMax:F3}] tex={layers[i].texture?.width}x{layers[i].texture?.height}");
+            }
+            Debug.Log(sb.ToString());
+        }
     }
+
+    private bool layerBuildLogged;
 
     private static Mesh BuildGlobePatchMesh(Vector3 center, float width, float depth, float radius, float lift)
     {
