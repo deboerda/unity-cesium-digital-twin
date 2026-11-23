@@ -143,10 +143,38 @@ public class FlightDataStreamReceiver : MonoBehaviour
     private readonly Dictionary<string, float> previousHeadingByTrack = new Dictionary<string, float>();
     private readonly Dictionary<string, DateTime> previousTimeByTrack = new Dictionary<string, DateTime>();
     private readonly Dictionary<string, List<string>> dataFields = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>JSON key / 列名 → 中文注释名，用于界面显示列名。</summary>
+    private readonly Dictionary<string, string> dataFieldDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, string>> latestValuesByTrack = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
     private int dataFieldsVersion;
     /// <summary>Incremented every time a DATA_FIELDS message is applied; cheap change detection for UI.</summary>
     public int DataFieldsVersion => dataFieldsVersion;
+
+    /// <summary>DATA_FIELDS 里的中文注释名（column → 中文），供界面当列名显示。</summary>
+    public string GetFieldDisplayName(string jsonKey)
+    {
+        if (string.IsNullOrWhiteSpace(jsonKey))
+            return null;
+        lock (dataLock)
+        {
+            return dataFieldDisplayNames.TryGetValue(jsonKey.Trim(), out var name) && !string.IsNullOrWhiteSpace(name)
+                ? name
+                : null;
+        }
+    }
+
+    /// <summary>某个 JSON key 的全部别名（中文注释里用顿号分隔的那些）。</summary>
+    public List<string> GetFieldAliases(string jsonKey)
+    {
+        if (string.IsNullOrWhiteSpace(jsonKey))
+            return null;
+        lock (dataLock)
+        {
+            if (!dataFields.TryGetValue(jsonKey.Trim(), out var aliases) || aliases == null)
+                return null;
+            return new List<string>(aliases);
+        }
+    }
     public IReadOnlyDictionary<string, List<string>> DataFields
     {
         get { lock (dataLock) { return new Dictionary<string, List<string>>(dataFields); } }
@@ -1334,35 +1362,103 @@ public class FlightDataStreamReceiver : MonoBehaviour
         lock (dataLock)
         {
             dataFields.Clear();
+            dataFieldDisplayNames.Clear();
             foreach (var property in fieldsToken.Properties())
             {
-                string jsonKey = (property.Name ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(jsonKey) || jsonKey == "fields")
+                string propertyName = (property.Name ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(propertyName) || propertyName == "fields")
                     continue;
 
+                // 新协议：{ "heading": { "column": "heading", "comment": "航向角(度)、航向、航向角" } }
+                string column = propertyName;
                 var aliases = new List<string>();
-                if (property.Value is JArray array)
+                bool parsedNewFormat = false;
+
+                if (property.Value is JObject fieldObject)
                 {
-                    foreach (var item in array)
+                    parsedNewFormat = true;
+                    string mappedColumn = (fieldObject.Value<string>("column") ?? string.Empty).Trim();
+                    if (!string.IsNullOrEmpty(mappedColumn))
+                        column = mappedColumn;
+
+                    string comment = fieldObject.Value<string>("comment");
+                    foreach (var alias in SplitFieldComment(comment))
+                        aliases.Add(alias);
+
+                    // 兼容旧写法：在新对象里再带一个 aliases/alias
+                    var extra = fieldObject["aliases"] ?? fieldObject["alias"];
+                    AppendAliases(extra, aliases);
+                }
+
+                if (!parsedNewFormat)
+                {
+                    if (property.Value is JArray array)
                     {
-                        string alias = item?.Value<string>();
+                        foreach (var item in array)
+                        {
+                            string alias = item?.Value<string>();
+                            if (!string.IsNullOrWhiteSpace(alias))
+                                aliases.Add(alias.Trim());
+                        }
+                    }
+                    else if (property.Value != null && property.Value.Type != JTokenType.Null)
+                    {
+                        string alias = property.Value.Value<string>();
                         if (!string.IsNullOrWhiteSpace(alias))
                             aliases.Add(alias.Trim());
                     }
                 }
-                else if (property.Value != null && property.Value.Type != JTokenType.Null)
-                {
-                    string alias = property.Value.Value<string>();
-                    if (!string.IsNullOrWhiteSpace(alias))
-                        aliases.Add(alias.Trim());
-                }
 
-                dataFields[jsonKey] = aliases;
+                if (aliases.Count == 0)
+                    aliases.Add(column);
+
+                dataFields[column] = aliases;
+                // comment 里的第一个词就是给界面看的列名
+                dataFieldDisplayNames[column] = aliases[0];
             }
             dataFieldsVersion++;
         }
 
         Log($"DATA_FIELDS received: {dataFields.Count} json keys ({string.Join(", ", dataFields.Keys)})");
+    }
+
+    /// <summary>把 "航向角(度)、航向、航向角" 拆成别名列表（顿号/逗号/分号/斜杠/空白都算分隔）。</summary>
+    private static IEnumerable<string> SplitFieldComment(string comment)
+    {
+        if (string.IsNullOrWhiteSpace(comment))
+            yield break;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string[] parts = comment.Split(
+            new[] { '、', '，', ',', ';', '；', '/', '|', '\n', '\r', '\t', ' ' },
+            StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i].Trim();
+            if (part.Length == 0 || !seen.Add(part))
+                continue;
+            yield return part;
+        }
+    }
+
+    private static void AppendAliases(JToken token, List<string> into)
+    {
+        if (token == null || into == null)
+            return;
+        if (token is JArray array)
+        {
+            foreach (var item in array)
+            {
+                string alias = item?.Value<string>();
+                if (!string.IsNullOrWhiteSpace(alias))
+                    into.Add(alias.Trim());
+            }
+            return;
+        }
+        if (token.Type == JTokenType.Null)
+            return;
+        string text = token.Value<string>();
+        if (!string.IsNullOrWhiteSpace(text))
+            into.Add(text.Trim());
     }
 
     // Data-side implementations may keep the frame time beside a record rather

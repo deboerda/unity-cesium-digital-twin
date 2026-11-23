@@ -1,0 +1,96 @@
+{
+  "fields": {
+    "lng": {
+      "column": "lng",
+      "comment": "经度"
+    },
+    "lat": {
+      "column": "lat",
+      "comment": "纬度"
+    },
+    "alt": {
+      "column": "alt",
+      "comment": "高度(米)、高度"
+    },
+    "heading": {
+      "column": "heading",
+      "comment": "航向角(度)、航向、航向角"
+    },
+    "pitch": {
+      "column": "pitch",
+      "comment": "俯仰角(度)、俯仰、俯仰角"
+    },
+    "roll": {
+      "column": "roll",
+      "comment": "横滚角(度)、横滚、横滚角"
+    },
+    "speed": {
+      "column": "speed",
+      "comment": "速度(米/秒)、速度"
+    },
+    "battery": {
+      "column": "battery",
+      "comment": "电量(%)、电量"
+    },
+    "detectRange": {
+      "column": "detectRange",
+      "comment": "探测范围"
+    },
+    "yawAngle": {
+      "column": "yawAngle",
+      "comment": "扫描中心(度)、扫描中心、传感器左右偏转角、左右偏转角"
+    },
+    "pitchAngle": {
+      "column": "pitchAngle",
+      "comment": "俯仰中心(度)、俯仰中心、传感器上下偏转角、上下偏转角"
+    },
+    "yawScanAngle": {
+      "column": "yawScanAngle",
+      "comment": "扫描方位(度)、扫描方位、传感器左右扫描范围"
+    },
+    "pitchScanAngle": {
+      "column": "pitchScanAngle",
+      "comment": "俯仰方位(度)、俯仰方位、传感器上下扫描范围"
+    },
+    "state": {
+      "column": "state",
+      "comment": "状态"
+    },
+    "alarm": {
+      "column": "alarm",
+      "comment": "告警"
+    },
+    "detectorType": {
+      "column": "detectorType",
+      "comment": "探测器类型、探测器名称"
+    },
+    "rangeType": {
+      "column": "rangeType",
+      "comment": "范围类型"
+    },
+    "centerPoint": {
+      "column": "centerPoint",
+      "comment": "中心点"
+    },
+    "radarStatus": {
+      "column": "radarStatus",
+      "comment": "雷达状态"
+    },
+    "flightTime": {
+      "column": "flightTime",
+      "comment": "飞行时间"
+    },
+    "trackId": {
+      "column": "trackId",
+      "comment": "飞机编号"
+    },
+    "planId": {
+      "column": "planId",
+      "comment": "计划号"
+    },
+    "cycleId": {
+      "column": "cycleId",
+      "comment": "周期号"
+    }
+  }
+}

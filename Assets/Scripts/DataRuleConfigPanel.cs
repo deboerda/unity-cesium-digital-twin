@@ -345,13 +345,18 @@ public class DataRuleConfigPanel : MonoBehaviour
                 string key = kv.Key;
                 if (string.IsNullOrWhiteSpace(key))
                     continue;
-                string display = key;
-                foreach (var alias in kv.Value)
+                // DATA_FIELDS 的 comment 里第一个词就是给界面看的列名
+                string display = receiver != null ? receiver.GetFieldDisplayName(key) : null;
+                if (string.IsNullOrWhiteSpace(display))
                 {
-                    if (!string.IsNullOrWhiteSpace(alias) && !alias.Equals(key, StringComparison.Ordinal))
+                    display = key;
+                    foreach (var alias in kv.Value)
                     {
-                        display = alias;
-                        break;
+                        if (!string.IsNullOrWhiteSpace(alias) && !alias.Equals(key, StringComparison.Ordinal))
+                        {
+                            display = alias;
+                            break;
+                        }
                     }
                 }
                 fieldDict.Add(new FieldDef
@@ -1240,9 +1245,9 @@ public class DataRuleConfigPanel : MonoBehaviour
 
         var matches = new List<string>();
         foreach (var f in fieldDict)
-            if (f.common) matches.Add($"{f.key}（{f.displayName}）");
+            if (f.common) matches.Add(FieldPickerLabel(f));
         foreach (var f in fieldDict)
-            if (!f.common) matches.Add($"{f.key}（{f.displayName}）");
+            if (!f.common) matches.Add(FieldPickerLabel(f));
 
         if (matches.Count == 0)
         {
@@ -1252,8 +1257,19 @@ public class DataRuleConfigPanel : MonoBehaviour
 
         bool hasRemote = receiver != null && receiver.DataFields.Count > 0;
         ShowSuggestionPanel(matches, hasRemote
-            ? "选择要添加的变量（JSON key，常用在前）"
-            : "尚未收到 DATA_FIELDS，先展示内置常用变量（收到后以 JSON key 为准）");
+            ? "选择要添加的变量（中文列名，常用在前）"
+            : "尚未收到 DATA_FIELDS，先展示内置常用变量（收到后以数据端列名为准）");
+    }
+
+    /// <summary>添加行列表只显示中文注释；没有中文时退回 JSON key。</summary>
+    private static string FieldPickerLabel(FieldDef f)
+    {
+        if (f == null)
+            return string.Empty;
+        if (!string.IsNullOrWhiteSpace(f.displayName) &&
+            !string.Equals(f.displayName, f.key, StringComparison.OrdinalIgnoreCase))
+            return f.displayName;
+        return f.key;
     }
 
     private void AddEntryWithFieldKey(string jsonKey)
@@ -2176,8 +2192,24 @@ public class DataRuleConfigPanel : MonoBehaviour
         var matches = new List<string>();
         foreach (var f in fieldDict)
         {
-            if (f.key.ToLowerInvariant().Contains(lower) || f.displayName.Contains(text))
-                matches.Add($"{f.key}（{f.displayName}）");
+            bool hit = f.key.ToLowerInvariant().Contains(lower) || f.displayName.Contains(text);
+            if (!hit)
+            {
+                var aliases = GetFieldAliases(f.key);
+                if (aliases != null)
+                {
+                    foreach (var alias in aliases)
+                    {
+                        if (!string.IsNullOrWhiteSpace(alias) && alias.Contains(text))
+                        {
+                            hit = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (hit)
+                matches.Add(FieldPickerLabel(f));
         }
 
         if (matches.Count == 0)
@@ -2186,7 +2218,7 @@ public class DataRuleConfigPanel : MonoBehaviour
             return;
         }
 
-        ShowSuggestionPanel(matches, "候选变量（JSON key）— 点击选择");
+        ShowSuggestionPanel(matches, "候选变量（中文列名）— 点击选择");
     }
 
     private void BindAddButton()
@@ -2434,7 +2466,7 @@ public class DataRuleConfigPanel : MonoBehaviour
         for (int i = 0; i < matches.Count; i++)
         {
             string match = matches[i];
-            string key = ExtractKeyFromMatch(match);
+            string key = FindFieldKey(match) ?? ExtractKeyFromMatch(match);
 
             RectTransform btnRect = FindOrCreateRect(overlay, $"MatchBtn_{i}");
             btnRect.anchorMin = new Vector2(0.1f, 1f);

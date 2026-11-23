@@ -22,6 +22,7 @@
             "alt",
             "altitude",
             "height",
+            "高度(米)",
             "高度"
         ]
     },
@@ -30,6 +31,7 @@
         "aliases": [
             "heading",
             "yaw",
+            "航向角(度)",
             "航向",
             "航向角"
         ]
@@ -38,6 +40,7 @@
         "internalKey": "pitch",
         "aliases": [
             "pitch",
+            "俯仰角(度)",
             "俯仰",
             "俯仰角"
         ]
@@ -46,6 +49,7 @@
         "internalKey": "roll",
         "aliases": [
             "roll",
+            "横滚角(度)",
             "横滚",
             "横滚角"
         ]
@@ -54,6 +58,7 @@
         "internalKey": "speed",
         "aliases": [
             "speed",
+            "速度(米/秒)",
             "速度"
         ]
     },
@@ -61,6 +66,7 @@
         "internalKey": "battery",
         "aliases": [
             "battery",
+            "电量(%)",
             "电量"
         ]
     },
