@@ -2,7 +2,7 @@
 
 基于 Unity 2022.3 的编队飞行与传感器扫描范围可视化工程。二维地图与三维场景共用同一套位置、姿态和传感器数据。
 
-当前版本 **1.10**。仓库： [unity-cesium-digital-twin](https://github.com/deboerda/unity-cesium-digital-twin)。内部交接见 [交接文档.md](交接文档.md)、[交接讲解稿.md](交接讲解稿.md)。
+当前版本 **1.11**。仓库： [unity-cesium-digital-twin](https://github.com/deboerda/unity-cesium-digital-twin)。内部交接见 [交接文档.md](交接文档.md)、[交接讲解稿.md](交接讲解稿.md)。
 
 ## 环境
 
@@ -106,4 +106,4 @@ Packages/manifest.json       包引用
 
 ## 版本
 
-见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.10** 为当前发版：`DATA_FIELDS` 支持 `{column, comment}` 新格式，配置界面按中文注释显示列名；二维差值面板支持表头排序；超过 10 秒没有新位置的飞机自动清掉，F4 面板可「清除所有飞机」。
+见 [Releases](https://github.com/deboerda/unity-cesium-digital-twin/releases)。**1.11** 为当前发版：告警面板状态列显示数据里的 `state` 原值；`DATA_FIELDS` 支持 `{column, comment}`，配置界面按中文注释显示列名；差值面板支持表头排序；超时飞机自动清理。

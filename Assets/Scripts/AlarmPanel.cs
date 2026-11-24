@@ -143,11 +143,10 @@ public class AlarmPanel : MonoBehaviour
         {
             var entry = visibleEntries[i];
             string id = string.IsNullOrWhiteSpace(entry.trackId) ? "unknown" : entry.trackId;
-            string alarm = string.IsNullOrWhiteSpace(entry.alarm)
-                ? (string.IsNullOrWhiteSpace(entry.state) ? "异常" : entry.state)
-                : entry.alarm;
+            // 告警信息列只放 alarm；状态列显示数据里的 state 原值，不要用正常/异常顶替。
+            string alarm = string.IsNullOrWhiteSpace(entry.alarm) ? "-" : entry.alarm;
             bool abnormal = IsAbnormalStatus(entry.alarm, entry.state);
-            string stateStr = abnormal ? "异常" : "正常";
+            string stateStr = string.IsNullOrWhiteSpace(entry.state) ? "-" : entry.state;
             string time = string.IsNullOrWhiteSpace(entry.flightTime) ? "-" : entry.flightTime;
 
             SetRowTexts(rows[i], id, alarm, time, stateStr);
