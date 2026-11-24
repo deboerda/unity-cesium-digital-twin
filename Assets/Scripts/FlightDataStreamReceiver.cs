@@ -129,6 +129,8 @@ public class FlightDataStreamReceiver : MonoBehaviour
     private readonly Dictionary<string, TrackPosition> latestPositionsByTrack = new Dictionary<string, TrackPosition>();
     /// <summary>每架飞机最后一次收到位置的时刻，用于清理上一批遗留的“死数据”。</summary>
     private readonly Dictionary<string, DateTime> lastPositionUtcByTrack = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+    /// <summary>整个数据流最后一次收到位置的时刻。暂停后它就不再更新，据此避免把暂停误判成过期。</summary>
+    private DateTime lastPositionFrameUtc = DateTime.MinValue;
     private readonly Dictionary<string, TrackLine> latestTrackLinesByTrack = new Dictionary<string, TrackLine>();
     private readonly Dictionary<string, TrackTimetableState> latestStatesByTrack = new Dictionary<string, TrackTimetableState>();
     private readonly Dictionary<string, TrackTimetableState> latestSensorsByKey = new Dictionary<string, TrackTimetableState>();
@@ -268,6 +270,14 @@ public class FlightDataStreamReceiver : MonoBehaviour
             return false;
         if (string.IsNullOrWhiteSpace(trackId))
             return true;
+
+        // 整个数据流停了（暂停、回放停住）就不要清：暂停时没有新帧，任何飞机都会“超时”。
+        // 只有还在持续收到新位置、而某架飞机一直没跟上时，才判定它是上一批的遗留数据。
+        if (lastPositionFrameUtc == DateTime.MinValue)
+            return false;
+        if ((nowUtc - lastPositionFrameUtc).TotalSeconds > staleTrackSeconds)
+            return false;
+
         if (!lastPositionUtcByTrack.TryGetValue(trackId, out var lastUtc))
             return false;
         return (nowUtc - lastUtc).TotalSeconds > staleTrackSeconds;
@@ -280,6 +290,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
         {
             latestPositionsByTrack.Clear();
             lastPositionUtcByTrack.Clear();
+            lastPositionFrameUtc = DateTime.MinValue;
             latestTrackLinesByTrack.Clear();
             latestStatesByTrack.Clear();
             latestSensorsByKey.Clear();
@@ -2082,6 +2093,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
 
         latestPositionsByTrack[trackId] = position;
         lastPositionUtcByTrack[trackId] = DateTime.UtcNow;
+        lastPositionFrameUtc = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(primaryTrackId))
             primaryTrackId = trackId;
         UpdateTurnRate(trackId, position);
@@ -2226,6 +2238,7 @@ public class FlightDataStreamReceiver : MonoBehaviour
         if (roll.HasValue) position.roll = roll.Value;
         latestPositionsByTrack[trackId] = position;
         lastPositionUtcByTrack[trackId] = DateTime.UtcNow;
+        lastPositionFrameUtc = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(primaryTrackId))
             primaryTrackId = trackId;
         UpdateTurnRate(trackId, position);
